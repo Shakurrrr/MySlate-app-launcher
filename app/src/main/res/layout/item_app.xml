@@ -1,4 +1,3 @@
-<?xml version="1.0" encoding="utf-8"?>
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="wrap_content"
     android:layout_height="wrap_content"
@@ -10,17 +9,19 @@
         android:id="@+id/app_icon"
         android:layout_width="64dp"
         android:layout_height="64dp"
-        android:scaleType="fitCenter"
-        android:contentDescription="App Icon" />
+        android:scaleType="centerInside"
+        android:layout_gravity="center"
+        android:background="@drawable/icon_background"
+        android:padding="8dp" />
 
     <TextView
         android:id="@+id/app_label"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:text="App Name"
-        android:textSize="14sp"
-        android:gravity="center"
+        android:textColor="#FFFFFF"
+        android:textSize="12sp"
         android:maxLines="1"
         android:ellipsize="end"
-        android:layout_marginTop="4dp"/>
+        android:gravity="center"
+        android:layout_marginTop="4dp" />
 </LinearLayout>

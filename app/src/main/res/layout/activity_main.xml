@@ -1,11 +1,16 @@
 <?xml version="1.0" encoding="utf-8"?>
 <GridView xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
     android:id="@+id/app_grid"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
+    android:columnWidth="90dp"
+    android:gravity="center"
+    android:horizontalSpacing="24dp"
     android:numColumns="auto_fit"
-    android:columnWidth="100dp"
-    android:verticalSpacing="16dp"
-    android:horizontalSpacing="16dp"
+    android:padding="16dp"
     android:stretchMode="columnWidth"
-    android:gravity="center" />
+    android:verticalSpacing="24dp"
+    android:visibility="visible"
+    tools:visibility="visible" />
+
