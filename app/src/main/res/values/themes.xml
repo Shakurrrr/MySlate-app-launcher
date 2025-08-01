@@ -3,4 +3,11 @@
     <style name="Theme.MySlateAppLauncher" parent="Theme.Material3.DayNight.NoActionBar">
     </style>
 
+    <!-- Dark Theme -->
+    <style name="Theme.MySlates.Dark" parent="Theme.MaterialComponents.DayNight.NoActionBar">
+        <item name="colorPrimary">#121212</item>
+        <item name="android:textColorPrimary">#ffffff</item>
+    </style>
+
+
 </resources>

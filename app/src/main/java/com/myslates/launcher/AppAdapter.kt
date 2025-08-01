@@ -10,16 +10,21 @@ import android.view.ViewGroup
 import android.widget.BaseAdapter
 import android.widget.ImageView
 import android.widget.TextView
-import com.myslates.launcher.R
 import com.myslates.launcher.AppObject
 
-class AppAdapter(private val context: Context, private val apps: List<AppObject>) : BaseAdapter() {
+class AppAdapter(private val context: Context, private var apps: List<AppObject>) : BaseAdapter() {
 
     override fun getCount(): Int = apps.size
 
     override fun getItem(position: Int): Any = apps[position]
 
     override fun getItemId(position: Int): Long = position.toLong()
+
+    fun updateData(newApps: List<AppObject>) {
+        this.apps = newApps
+        notifyDataSetChanged()
+    }
+
 
     override fun getView(position: Int, convertView: View?, parent: ViewGroup?): View {
         val view = convertView ?: LayoutInflater.from(context).inflate(R.layout.item_app, parent, false)
@@ -31,14 +36,16 @@ class AppAdapter(private val context: Context, private val apps: List<AppObject>
         iconView.setImageDrawable(app.icon)
         labelView.text = app.label
 
-        // ⬇️ Set click listener to launch the app
+
+
+        //click listener to launch the app
         view.setOnClickListener {
             try {
                 val launchIntent = context.packageManager.getLaunchIntentForPackage(app.packageName)
                 if (launchIntent != null) {
                     context.startActivity(launchIntent)
                 } else {
-                    // Optionally show a toast or log fallback
+                    // log fallback
                 }
             } catch (e: Exception) {
                 e.printStackTrace()
