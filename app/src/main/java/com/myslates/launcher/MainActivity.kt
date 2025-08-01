@@ -89,6 +89,20 @@ class MainActivity : AppCompatActivity() {
             }
         })
 
+         // view forward touch event
+        val forwardTouchListener = View.OnTouchListener { _, event ->
+            gestureDetector.onTouchEvent(event)
+            true
+        }
+        rootLayout.setOnTouchListener(forwardTouchListener)
+        appDrawer.setOnTouchListener(forwardTouchListener)
+        appGridView.setOnTouchListener(forwardTouchListener)
+        searchInput.setOnTouchListener(forwardTouchListener)
+        searchIcon.setOnTouchListener(forwardTouchListener)
+        leftPanel.setOnTouchListener(forwardTouchListener)
+        rightPanel.setOnTouchListener(forwardTouchListener)
+
+
         // Load apps
         val pm = packageManager
         allFilteredApps = pm.getInstalledApplications(PackageManager.GET_META_DATA)
@@ -119,8 +133,8 @@ class MainActivity : AppCompatActivity() {
                         if (!isDrawerOpen) slideUpDrawer()
                         true
                     }
-                    deltaY > 150 -> {
-                        if (isDrawerOpen) slideDownDrawer()
+                    deltaY > 150 && isDrawerOpen -> { // Swipe down
+                        slideDownDrawer()
                         true
                     }
                     deltaX < -150 -> {
