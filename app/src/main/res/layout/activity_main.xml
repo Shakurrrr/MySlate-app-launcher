@@ -8,15 +8,16 @@
     xmlns:tools="http://schemas.android.com/tools"
     tools:context=".MainActivity">
 
-    <!-- Main content -->
+    <!-- Main Home Content -->
     <androidx.constraintlayout.widget.ConstraintLayout
         android:layout_width="match_parent"
         android:layout_height="match_parent"
-        android:paddingTop="48dp"
+        android:paddingTop="64dp"
         android:paddingBottom="48dp"
         android:paddingStart="24dp"
         android:paddingEnd="24dp">
 
+        <!-- Time and Date + Weather -->
         <LinearLayout
             android:id="@+id/top_info_bar"
             android:layout_width="wrap_content"
@@ -59,10 +60,9 @@
                     android:textSize="18sp" />
             </LinearLayout>
         </LinearLayout>
-
     </androidx.constraintlayout.widget.ConstraintLayout>
 
-    <!-- Blur Overlay -->
+    <!-- Blur Overlay for App Drawer -->
     <View
         android:id="@+id/blur_overlay"
         android:layout_width="match_parent"
@@ -71,7 +71,7 @@
         android:visibility="gone"
         android:alpha="0" />
 
-    <!-- Slide-up App Drawer -->
+    <!-- App Drawer -->
     <LinearLayout
         android:id="@+id/app_drawer"
         android:layout_width="match_parent"
@@ -96,7 +96,7 @@
             android:paddingStart="16dp"
             android:paddingEnd="12dp"
             android:gravity="center_vertical"
-            android:layout_marginTop="32dp"
+            android:layout_marginTop="8dp"
             android:layout_marginBottom="8dp">
 
             <EditText
@@ -133,6 +133,54 @@
             android:paddingTop="16dp"
             android:paddingBottom="16dp"
             android:gravity="center" />
+    </LinearLayout>
+
+    <!-- Left Panel -->
+    <LinearLayout
+        android:id="@+id/left_panel"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:orientation="vertical"
+        android:background="#222222"
+        android:visibility="gone"
+        android:translationX="-1000dp"
+        android:elevation="12dp">
+
+        <ImageView
+            android:id="@+id/close_left_panel"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:src="@android:drawable/ic_menu_close_clear_cancel"
+            android:padding="16dp"
+            android:layout_gravity="end"
+            android:contentDescription="Close Left Panel"
+            android:tint="#FFFFFF" />
+
+        <!-- Add left panel content here -->
+    </LinearLayout>
+
+    <!-- Right Panel -->
+    <LinearLayout
+        android:id="@+id/right_panel"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:orientation="vertical"
+        android:background="#222222"
+        android:visibility="gone"
+        android:translationX="1000dp"
+        android:elevation="12dp">
+
+        <ImageView
+            android:id="@+id/close_right_panel"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:src="@android:drawable/ic_menu_close_clear_cancel"
+            android:padding="16dp"
+            android:layout_gravity="start"
+            android:contentDescription="Close Right Panel"
+            android:tint="#FFFFFF" />
+
+        <!-- Add right panel content here -->
     </LinearLayout>
 
 </FrameLayout>
