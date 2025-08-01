@@ -64,46 +64,36 @@ class MainActivity : AppCompatActivity() {
         closeLeftPanel = findViewById(R.id.close_left_panel)
         closeRightPanel = findViewById(R.id.close_right_panel)
 
-        // Initial states
         appDrawer.post { appDrawer.translationY = appDrawer.height.toFloat() }
         blurOverlay.alpha = 0f
         blurOverlay.visibility = View.GONE
         weatherText.text = "☀ 24°"
 
-        // Clock
         handler.post(timeRunnable)
 
-        // Panel close buttons
         closeLeftPanel.setOnClickListener { hidePanels() }
         closeRightPanel.setOnClickListener { hidePanels() }
 
-        // Search functionality
-        searchInput.addTextChangedListener(object : android.text.TextWatcher {
-            override fun afterTextChanged(s: android.text.Editable?) {}
-            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
-            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {
-                val filtered = allFilteredApps.filter {
-                    it.label.contains(s.toString(), ignoreCase = true)
-                }
-                adapter.updateData(filtered)
-            }
-        })
+        // 🔧 Allow typing in searchInput while still enabling gestures elsewhere
+        searchInput.setOnTouchListener { v, event ->
+            v.parent.requestDisallowInterceptTouchEvent(true)
+            false
+        }
 
-         // view forward touch event
+        // Forward touch events for gesture handling
         val forwardTouchListener = View.OnTouchListener { _, event ->
             gestureDetector.onTouchEvent(event)
             true
         }
+
         rootLayout.setOnTouchListener(forwardTouchListener)
         appDrawer.setOnTouchListener(forwardTouchListener)
         appGridView.setOnTouchListener(forwardTouchListener)
-        searchInput.setOnTouchListener(forwardTouchListener)
         searchIcon.setOnTouchListener(forwardTouchListener)
         leftPanel.setOnTouchListener(forwardTouchListener)
         rightPanel.setOnTouchListener(forwardTouchListener)
 
-
-        // Load apps
+        // Load allowed apps
         val pm = packageManager
         allFilteredApps = pm.getInstalledApplications(PackageManager.GET_META_DATA)
             .filter { allowedApps.contains(it.packageName) }
@@ -115,7 +105,19 @@ class MainActivity : AppCompatActivity() {
         adapter = AppAdapter(this, allFilteredApps)
         appGridView.adapter = adapter
 
-        // Gesture detector
+        // Search listener
+        searchInput.addTextChangedListener(object : android.text.TextWatcher {
+            override fun afterTextChanged(s: android.text.Editable?) {}
+            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
+            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {
+                val filtered = allFilteredApps.filter {
+                    it.label.contains(s.toString(), ignoreCase = true)
+                }
+                adapter.updateData(filtered)
+            }
+        })
+
+        // Gesture setup
         gestureDetector = GestureDetector(this, object : GestureDetector.SimpleOnGestureListener() {
             override fun onDown(e: MotionEvent): Boolean {
                 downX = e.x
@@ -133,7 +135,7 @@ class MainActivity : AppCompatActivity() {
                         if (!isDrawerOpen) slideUpDrawer()
                         true
                     }
-                    deltaY > 150 && isDrawerOpen -> { // Swipe down
+                    deltaY > 150 && isDrawerOpen -> {
                         slideDownDrawer()
                         true
                     }
@@ -151,10 +153,6 @@ class MainActivity : AppCompatActivity() {
                 }
             }
         })
-
-        // Attach to root
-        rootLayout.setOnTouchListener { _, event -> gestureDetector.onTouchEvent(event) }
-        appDrawer.setOnTouchListener { _, event -> gestureDetector.onTouchEvent(event) }
     }
 
     private fun slideUpDrawer() {
