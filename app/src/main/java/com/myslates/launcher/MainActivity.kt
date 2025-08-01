@@ -1,9 +1,11 @@
 package com.myslates.launcher
 
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.provider.Settings
 import android.view.*
 import android.view.animation.AccelerateDecelerateInterpolator
 import android.widget.*
@@ -26,8 +28,6 @@ class MainActivity : AppCompatActivity() {
     private lateinit var allFilteredApps: List<AppObject>
     private lateinit var leftPanel: View
     private lateinit var rightPanel: View
-    private lateinit var closeLeftPanel: ImageView
-    private lateinit var closeRightPanel: ImageView
     private lateinit var gestureDetector: GestureDetector
 
     private val handler = Handler(Looper.getMainLooper())
@@ -61,8 +61,6 @@ class MainActivity : AppCompatActivity() {
         searchIcon = appDrawer.findViewById(R.id.search_icon)
         leftPanel = findViewById(R.id.left_panel)
         rightPanel = findViewById(R.id.right_panel)
-        closeLeftPanel = findViewById(R.id.close_left_panel)
-        closeRightPanel = findViewById(R.id.close_right_panel)
 
         appDrawer.post { appDrawer.translationY = appDrawer.height.toFloat() }
         blurOverlay.alpha = 0f
@@ -71,8 +69,6 @@ class MainActivity : AppCompatActivity() {
 
         handler.post(timeRunnable)
 
-        closeLeftPanel.setOnClickListener { hidePanels() }
-        closeRightPanel.setOnClickListener { hidePanels() }
 
         // 🔧 Allow typing in searchInput while still enabling gestures elsewhere
         searchInput.setOnTouchListener { v, event ->
@@ -192,6 +188,15 @@ class MainActivity : AppCompatActivity() {
             rightPanel.animate().translationX(rightPanel.width.toFloat()).setDuration(300).withEndAction {
                 rightPanel.visibility = View.GONE
             }.start()
+            fun openSettings(view: View) {
+                try {
+                    val intent = Intent(Settings.ACTION_SETTINGS)
+                    startActivity(intent)
+                } catch (e: Exception) {
+                    Toast.makeText(this, "Unable to open Settings", Toast.LENGTH_SHORT).show()
+                }
+            }
+
         }
     }
 

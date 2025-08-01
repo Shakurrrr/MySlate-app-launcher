@@ -144,17 +144,21 @@
         android:background="#222222"
         android:visibility="gone"
         android:translationX="-1000dp"
-        android:elevation="12dp">
-
-        <ImageView
-            android:id="@+id/close_left_panel"
+        android:elevation="12dp"
+        android:paddingTop="48dp">
+        <TextView
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:src="@android:drawable/ic_menu_close_clear_cancel"
-            android:padding="16dp"
-            android:layout_gravity="end"
-            android:contentDescription="Close Left Panel"
-            android:tint="#FFFFFF" />
+            android:text="Quick Tools"
+            android:textSize="20sp"
+            android:textColor="@android:color/white"
+            android:layout_marginBottom="16dp" />
+
+        <Button
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Settings"
+            android:onClick="openSettings" />
 
         <!-- Add left panel content here -->
     </LinearLayout>
@@ -168,17 +172,23 @@
         android:background="#222222"
         android:visibility="gone"
         android:translationX="1000dp"
-        android:elevation="12dp">
+        android:elevation="12dp"
+        android:paddingTop="48dp">
 
-        <ImageView
-            android:id="@+id/close_right_panel"
+        <TextView
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:src="@android:drawable/ic_menu_close_clear_cancel"
-            android:padding="16dp"
-            android:layout_gravity="start"
-            android:contentDescription="Close Right Panel"
-            android:tint="#FFFFFF" />
+            android:text="Recent Apps"
+            android:textSize="20sp"
+            android:textColor="@android:color/white"
+            android:layout_marginBottom="16dp" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="No recent apps available."
+            android:textColor="#AAAAAA" />
+
 
         <!-- Add right panel content here -->
     </LinearLayout>
