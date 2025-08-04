@@ -73,7 +73,7 @@ This project is licensed under the MIT License.
 
 👨‍💻 Author
 MySlates Engineering Team
-For inquiries, contact: support@myslates.example.com
+For inquiries, contact: 
 
 
 
