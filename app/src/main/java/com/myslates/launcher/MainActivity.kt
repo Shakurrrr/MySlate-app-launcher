@@ -41,8 +41,41 @@ class MainActivity : AppCompatActivity() {
         "com.ATS.MySlates",
         "com.ATS.MySlates.Teacher",
         "com.adobe.reader",
-        "com.android.settings"
+        "com.android.settings",
+        "com.android.dialer",
+        "com.samsung.android.messaging",
+        "com.android.chrome"
     )
+
+    private fun launchApp(packageName: String) {
+        try {
+            val intent = packageManager.getLaunchIntentForPackage(packageName)
+            if (intent != null) {
+                startActivity(intent)
+            } else {
+                Toast.makeText(this, "App not found: $packageName", Toast.LENGTH_SHORT).show()
+            }
+        } catch (e: Exception) {
+            Toast.makeText(this, "Cannot launch app: ${e.message}", Toast.LENGTH_SHORT).show()
+            Log.e("Launcher", "Failed to launch $packageName", e)
+        }
+    }
+
+
+    fun addTapEffect(view: View) {
+        view.setOnTouchListener { v, event ->
+            when (event.action) {
+                MotionEvent.ACTION_DOWN -> {
+                    v.animate().scaleX(0.85f).scaleY(0.85f).setDuration(100).start()
+                }
+                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                    v.animate().scaleX(1f).scaleY(1f).setDuration(100).start()
+                }
+            }
+            false
+        }
+    }
+
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -74,6 +107,39 @@ class MainActivity : AppCompatActivity() {
             false
         }
 
+        val callBtn: ImageView = findViewById(R.id.icon_call)
+        val msgBtn: ImageView= findViewById(R.id.icon_message)
+        val browserBtn: ImageView = findViewById(R.id.icon_browser)
+        val settingsBtn: ImageView = findViewById(R.id.icon_settings)
+
+        callBtn.setOnClickListener { launchApp("com.samsung.android.dialer") }
+        msgBtn.setOnClickListener { launchApp("com.samsung.android.messaging") }
+        browserBtn.setOnClickListener { launchApp("com.android.chrome") }
+        settingsBtn.setOnClickListener {
+            startActivity(Intent(Settings.ACTION_SETTINGS))
+        }
+
+
+        val call = findViewById<ImageView>(R.id.icon_call)
+        addTapEffect(call)
+        call.setOnClickListener { launchApp("com.android.dialer") }
+
+
+        val message = findViewById<ImageView>(R.id.icon_message)
+        addTapEffect(message)
+            message.setOnClickListener{launchApp("com.samsung.android.messaging")
+        }
+
+        val browser = findViewById<ImageView>(R.id.icon_browser)
+        addTapEffect(browser)
+        browser.setOnClickListener{launchApp("com.android.chrome") }
+
+        val settings = findViewById<ImageView>(R.id.icon_settings)
+        addTapEffect(settings)
+        settings.setOnClickListener{launchApp("com.android.settings")
+        }
+
+
         val forwardTouchListener = View.OnTouchListener { _, event ->
             gestureDetector.onTouchEvent(event)
             true
@@ -96,6 +162,23 @@ class MainActivity : AppCompatActivity() {
             }
         adapter = AppAdapter(this, allFilteredApps)
         appGridView.adapter = adapter
+
+        findViewById<ImageView>(R.id.icon_call).setOnClickListener {
+            launchApp("com.samsung.android.dialer")
+        }
+
+        findViewById<ImageView>(R.id.icon_message).setOnClickListener {
+            launchApp("com.samsung.android.messaging")
+        }
+
+        findViewById<ImageView>(R.id.icon_browser).setOnClickListener {
+            launchApp("com.android.chrome")
+        }
+
+        findViewById<ImageView>(R.id.icon_settings).setOnClickListener {
+            launchApp("com.android.settings")
+        }
+
 
         searchInput.addTextChangedListener(object : android.text.TextWatcher {
             override fun afterTextChanged(s: android.text.Editable?) {}
@@ -155,6 +238,7 @@ class MainActivity : AppCompatActivity() {
             Toast.makeText(this, "Unable to open Settings.", Toast.LENGTH_SHORT).show()
         }
     }
+
 
     private fun slideUpDrawer() {
         if (!isFinishing && !isDestroyed) {

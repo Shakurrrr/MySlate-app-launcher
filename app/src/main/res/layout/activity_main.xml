@@ -70,6 +70,58 @@
         android:visibility="gone"
         android:alpha="0" />
 
+    <!-- Bottom apps icons -->
+    <LinearLayout
+        android:id="@+id/bottom_bar"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_gravity="bottom"
+        android:orientation="horizontal"
+        android:gravity="center"
+        android:background="@android:color/transparent"
+        android:paddingBottom="24dp"
+        android:paddingTop="8dp"
+        android:layout_marginBottom="32dp"
+        android:weightSum="4">
+
+        <ImageView
+            android:id="@+id/icon_call"
+            android:layout_width="0dp"
+            android:layout_height="56dp"
+            android:layout_weight="1"
+            android:src="@drawable/ic_call_white"
+            android:scaleType="centerInside"
+            android:contentDescription="Call" />
+
+        <ImageView
+            android:id="@+id/icon_message"
+            android:layout_width="0dp"
+            android:layout_height="56dp"
+            android:layout_weight="1"
+            android:src="@drawable/ic_message_white"
+            android:scaleType="centerInside"
+            android:contentDescription="Message" />
+
+        <ImageView
+            android:id="@+id/icon_browser"
+            android:layout_width="0dp"
+            android:layout_height="56dp"
+            android:layout_weight="1"
+            android:src="@drawable/ic_browser_white"
+            android:scaleType="centerInside"
+            android:contentDescription="Browser" />
+
+        <ImageView
+            android:id="@+id/icon_settings"
+            android:layout_width="0dp"
+            android:layout_height="56dp"
+            android:layout_weight="1"
+            android:src="@drawable/ic_settings_white"
+            android:scaleType="centerInside"
+            android:contentDescription="Settings" />
+    </LinearLayout>
+
+
     <!-- App Drawer -->
     <LinearLayout
         android:id="@+id/app_drawer"
@@ -158,12 +210,6 @@
                 android:textSize="20sp"
                 android:textColor="@android:color/white"
                 android:layout_marginBottom="16dp" />
-
-            <Button
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:text="Settings"
-                android:onClick="openSettings" />
 
         </LinearLayout>
     </ScrollView>
