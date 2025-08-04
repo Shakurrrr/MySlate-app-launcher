@@ -1,3 +1,5 @@
+MySlates App Launcher
+
 A custom Android launcher developed in Kotlin, purpose-built for corporate or educational tablets. MySlates Launcher offers a polished, One UI-inspired experience with curated access control, dynamic UI elements, and gesture-based navigation—all while locking users into a controlled app environment.
 
 🚀 Features
