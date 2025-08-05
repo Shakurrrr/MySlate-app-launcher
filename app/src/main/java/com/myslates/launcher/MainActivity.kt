@@ -1,5 +1,6 @@
 package com.myslates.launcher
 
+import android.content.ClipData
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Bundle
@@ -18,6 +19,7 @@ class MainActivity : AppCompatActivity() {
 
     private lateinit var appDrawer: View
     private lateinit var rootLayout: View
+    private lateinit var homeContainer: FrameLayout
     private lateinit var blurOverlay: View
     private lateinit var timeText: TextView
     private lateinit var dateText: TextView
@@ -30,6 +32,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var leftPanel: View
     private lateinit var rightPanel: View
     private lateinit var gestureDetector: GestureDetector
+    private val droppedApps = mutableListOf<DroppedApp>()
 
     private val handler = Handler(Looper.getMainLooper())
     private var isDrawerOpen = false
@@ -85,6 +88,7 @@ class MainActivity : AppCompatActivity() {
 
         appDrawer = findViewById(R.id.app_drawer)
         rootLayout = findViewById(R.id.root_layout)
+        homeContainer = findViewById(R.id.home_container)
         blurOverlay = findViewById(R.id.blur_overlay)
         timeText = findViewById(R.id.text_time)
         dateText = findViewById(R.id.text_date)
@@ -101,6 +105,9 @@ class MainActivity : AppCompatActivity() {
         weatherText.text = "\u2600 24\u00b0"
 
         handler.post(timeRunnable)
+        
+        // Set up drag and drop for the home screen
+        setupDragAndDrop()
 
         searchInput.setOnTouchListener { v, event ->
             v.parent.requestDisallowInterceptTouchEvent(true)
@@ -226,6 +233,112 @@ class MainActivity : AppCompatActivity() {
                 }
             }
         })
+    }
+    
+    private fun setupDragAndDrop() {
+        homeContainer.setOnDragListener { v, event ->
+            when (event.action) {
+                DragEvent.ACTION_DRAG_STARTED -> {
+                    // Check if this is an app being dragged
+                    event.clipDescription.hasMimeType(ClipDescription.MIMETYPE_TEXT_PLAIN)
+                }
+                
+                DragEvent.ACTION_DRAG_ENTERED -> {
+                    // Visual feedback when drag enters the drop zone
+                    homeContainer.alpha = 0.8f
+                    true
+                }
+                
+                DragEvent.ACTION_DRAG_EXITED -> {
+                    // Remove visual feedback when drag exits
+                    homeContainer.alpha = 1.0f
+                    true
+                }
+                
+                DragEvent.ACTION_DROP -> {
+                    // Handle the drop
+                    val clipData = event.clipData
+                    if (clipData != null && clipData.itemCount > 0) {
+                        val packageName = clipData.getItemAt(0).text.toString()
+                        val appObject = event.localState as? AppObject
+                        
+                        if (appObject != null) {
+                            // Create dropped app at the drop location
+                            val droppedApp = DroppedApp(
+                                appObject.label,
+                                appObject.icon,
+                                packageName,
+                                event.x,
+                                event.y
+                            )
+                            
+                            addDroppedAppToHomeScreen(droppedApp)
+                            droppedApps.add(droppedApp)
+                            
+                            // Close the app drawer
+                            slideDownDrawer()
+                        }
+                    }
+                    homeContainer.alpha = 1.0f
+                    true
+                }
+                
+                DragEvent.ACTION_DRAG_ENDED -> {
+                    // Clean up
+                    homeContainer.alpha = 1.0f
+                    true
+                }
+                
+                else -> false
+            }
+        }
+    }
+    
+    private fun addDroppedAppToHomeScreen(droppedApp: DroppedApp) {
+        val appView = LayoutInflater.from(this).inflate(R.layout.home_app_item, null)
+        val iconView = appView.findViewById<ImageView>(R.id.home_app_icon)
+        val labelView = appView.findViewById<TextView>(R.id.home_app_label)
+        
+        iconView.setImageDrawable(droppedApp.icon)
+        labelView.text = droppedApp.label
+        
+        // Set click listener to launch the app
+        appView.setOnClickListener {
+            launchApp(droppedApp.packageName)
+        }
+        
+        // Add tap effect
+        addTapEffect(appView)
+        
+        // Set up long click for removal
+        appView.setOnLongClickListener {
+            showRemoveAppDialog(droppedApp, appView)
+            true
+        }
+        
+        // Position the app view
+        val layoutParams = FrameLayout.LayoutParams(
+            FrameLayout.LayoutParams.WRAP_CONTENT,
+            FrameLayout.LayoutParams.WRAP_CONTENT
+        )
+        
+        // Adjust position to center the view on the drop point
+        layoutParams.leftMargin = (droppedApp.x - 40).toInt() // 40dp is roughly half the icon size
+        layoutParams.topMargin = (droppedApp.y - 40).toInt()
+        
+        homeContainer.addView(appView, layoutParams)
+    }
+    
+    private fun showRemoveAppDialog(droppedApp: DroppedApp, appView: View) {
+        val builder = android.app.AlertDialog.Builder(this)
+        builder.setTitle("Remove App")
+        builder.setMessage("Remove ${droppedApp.label} from home screen?")
+        builder.setPositiveButton("Remove") { _, _ ->
+            homeContainer.removeView(appView)
+            droppedApps.remove(droppedApp)
+        }
+        builder.setNegativeButton("Cancel", null)
+        builder.show()
     }
 
     fun openSettings(view: View) {

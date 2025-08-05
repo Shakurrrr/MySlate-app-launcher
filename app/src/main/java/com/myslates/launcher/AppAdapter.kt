@@ -4,12 +4,15 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.drawable.Drawable
+import android.view.DragEvent
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
 import android.widget.BaseAdapter
 import android.widget.ImageView
 import android.widget.TextView
+import android.content.ClipData
+import android.content.ClipDescription
 import com.myslates.launcher.AppObject
 
 class AppAdapter(private val context: Context, private var apps: List<AppObject>) : BaseAdapter() {
@@ -36,6 +39,14 @@ class AppAdapter(private val context: Context, private var apps: List<AppObject>
         iconView.setImageDrawable(app.icon)
         labelView.text = app.label
 
+        // Set up long click for drag and drop
+        view.setOnLongClickListener { v ->
+            val dragData = ClipData.newPlainText("app_package", app.packageName)
+            val dragShadow = View.DragShadowBuilder(DraggedAppView(context, app.icon, app.label))
+            
+            v.startDragAndDrop(dragData, dragShadow, app, 0)
+            true
+        }
 
 
         //click listener to launch the app
