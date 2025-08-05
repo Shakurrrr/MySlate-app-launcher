@@ -1,6 +1,7 @@
 package com.myslates.launcher
 
 import android.content.ClipData
+import android.content.ClipDescription
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Bundle
