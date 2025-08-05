@@ -241,18 +241,23 @@ class MainActivity : AppCompatActivity() {
             when (event.action) {
                 DragEvent.ACTION_DRAG_STARTED -> {
                     // Check if this is an app being dragged
-                    event.clipDescription.hasMimeType(ClipDescription.MIMETYPE_TEXT_PLAIN)
+                    val result = event.clipDescription.hasMimeType(ClipDescription.MIMETYPE_TEXT_PLAIN)
+                    if (result) {
+                        // Show visual feedback that we can accept the drop
+                        homeContainer.alpha = 0.9f
+                    }
+                    result
                 }
                 
                 DragEvent.ACTION_DRAG_ENTERED -> {
                     // Visual feedback when drag enters the drop zone
-                    homeContainer.alpha = 0.8f
+                    homeContainer.alpha = 0.7f
                     true
                 }
                 
                 DragEvent.ACTION_DRAG_EXITED -> {
                     // Remove visual feedback when drag exits
-                    homeContainer.alpha = 1.0f
+                    homeContainer.alpha = 0.9f
                     true
                 }
                 
@@ -276,8 +281,10 @@ class MainActivity : AppCompatActivity() {
                             addDroppedAppToHomeScreen(droppedApp)
                             droppedApps.add(droppedApp)
                             
-                            // Close the app drawer
-                            slideDownDrawer()
+                            // Close the app drawer after a short delay
+                            handler.postDelayed({
+                                slideDownDrawer()
+                            }, 200)
                         }
                     }
                     homeContainer.alpha = 1.0f

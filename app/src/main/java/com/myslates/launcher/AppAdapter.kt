@@ -13,9 +13,14 @@ import android.widget.ImageView
 import android.widget.TextView
 import android.content.ClipData
 import android.content.ClipDescription
+import android.os.Handler
+import android.os.Looper
 import com.myslates.launcher.AppObject
 
 class AppAdapter(private val context: Context, private var apps: List<AppObject>) : BaseAdapter() {
+    private val longPressHandler = Handler(Looper.getMainLooper())
+    private var longPressRunnable: Runnable? = null
+    private var isDragging = false
 
     override fun getCount(): Int = apps.size
 
@@ -39,17 +44,73 @@ class AppAdapter(private val context: Context, private var apps: List<AppObject>
         iconView.setImageDrawable(app.icon)
         labelView.text = app.label
 
-        // Set up long click for drag and drop
-        view.setOnLongClickListener { v ->
-            val dragData = ClipData.newPlainText("app_package", app.packageName)
-            val dragShadow = View.DragShadowBuilder(DraggedAppView(context, app.icon, app.label))
-            
-            v.startDragAndDrop(dragData, dragShadow, app, 0)
-            true
+        // Set up touch handling for both click and drag
+        view.setOnTouchListener { v, event ->
+            when (event.action) {
+                MotionEvent.ACTION_DOWN -> {
+                    isDragging = false
+                    // Start long press timer
+                    longPressRunnable = Runnable {
+                        if (!isDragging) {
+                            isDragging = true
+                            startDragAndDrop(v, app)
+                        }
+                    }
+                    longPressHandler.postDelayed(longPressRunnable!!, 500) // 500ms for long press
+                    true
+                }
+                MotionEvent.ACTION_MOVE -> {
+                    // Cancel long press if user moves finger too much
+                    if (Math.abs(event.x - event.rawX) > 10 || Math.abs(event.y - event.rawY) > 10) {
+                        longPressRunnable?.let { longPressHandler.removeCallbacks(it) }
+                    }
+                    true
+                }
+                MotionEvent.ACTION_UP -> {
+                    longPressRunnable?.let { longPressHandler.removeCallbacks(it) }
+                    if (!isDragging) {
+                        // This is a regular click, launch the app
+                        launchApp(app.packageName)
+                    }
+                    isDragging = false
+                    true
+                }
+                MotionEvent.ACTION_CANCEL -> {
+                    longPressRunnable?.let { longPressHandler.removeCallbacks(it) }
+                    isDragging = false
+                    true
+                }
+                else -> false
+            }
         }
 
+        // Remove the old click listener since we handle it in touch listener now
+        view.setOnClickListener(null)
 
-        //click listener to launch the app
+        return view
+    }
+
+    private fun startDragAndDrop(view: View, app: AppObject) {
+        val dragData = ClipData.newPlainText("app_package", app.packageName)
+        val dragShadow = View.DragShadowBuilder(DraggedAppView(context, app.icon, app.label))
+        
+        view.startDragAndDrop(dragData, dragShadow, app, 0)
+        
+        // Add haptic feedback
+        view.performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS)
+    }
+
+    private fun launchApp(packageName: String) {
+        try {
+            val launchIntent = context.packageManager.getLaunchIntentForPackage(packageName)
+            if (launchIntent != null) {
+                context.startActivity(launchIntent)
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+    }
+}
         view.setOnClickListener {
             try {
                 val launchIntent = context.packageManager.getLaunchIntentForPackage(app.packageName)
