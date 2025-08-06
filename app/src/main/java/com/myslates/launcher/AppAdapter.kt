@@ -15,6 +15,7 @@ import android.content.ClipData
 import android.content.ClipDescription
 import android.os.Handler
 import android.os.Looper
+import android.view.MotionEvent
 import com.myslates.launcher.AppObject
 
 class AppAdapter(private val context: Context, private var apps: List<AppObject>) : BaseAdapter() {
@@ -32,7 +33,6 @@ class AppAdapter(private val context: Context, private var apps: List<AppObject>
         this.apps = newApps
         notifyDataSetChanged()
     }
-
 
     override fun getView(position: Int, convertView: View?, parent: ViewGroup?): View {
         val view = convertView ?: LayoutInflater.from(context).inflate(R.layout.item_app, parent, false)
@@ -84,9 +84,6 @@ class AppAdapter(private val context: Context, private var apps: List<AppObject>
             }
         }
 
-        // Remove the old click listener since we handle it in touch listener now
-        view.setOnClickListener(null)
-
         return view
     }
 
@@ -109,21 +106,5 @@ class AppAdapter(private val context: Context, private var apps: List<AppObject>
         } catch (e: Exception) {
             e.printStackTrace()
         }
-    }
-}
-        view.setOnClickListener {
-            try {
-                val launchIntent = context.packageManager.getLaunchIntentForPackage(app.packageName)
-                if (launchIntent != null) {
-                    context.startActivity(launchIntent)
-                } else {
-                    // log fallback
-                }
-            } catch (e: Exception) {
-                e.printStackTrace()
-            }
-        }
-
-        return view
     }
 }
