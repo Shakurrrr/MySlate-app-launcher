@@ -213,9 +213,11 @@ class MainActivity : AppCompatActivity() {
                     addView(iconView)
                     addView(labelView)
 
-                    setOnClickListener {
-                        if (appIntent != null) startActivity(appIntent)
-                        else Toast.makeText(context, "App not installed", Toast.LENGTH_SHORT).show()
+                    setOnLongClickListener {
+                        val clipData = ClipData.newPlainText("package", packageName)
+                        val shadow = View.DragShadowBuilder(this)
+                        startDragAndDrop(clipData, shadow, AppObject(appLabel, appIcon, packageName), 0)
+                        true
                     }
                 }
 
@@ -225,7 +227,6 @@ class MainActivity : AppCompatActivity() {
             }
         }
     }
-
 
 private fun setupDragAndDrop() {
         Log.d("MainActivity", "Setting up drag and drop")
