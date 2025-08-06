@@ -237,11 +237,17 @@ class MainActivity : AppCompatActivity() {
     }
     
     private fun setupDragAndDrop() {
+        Log.d("MainActivity", "Setting up drag and drop")
+        
         homeContainer.setOnDragListener { v, event ->
+            Log.d("MainActivity", "Drag event: ${event.action}")
+            
             when (event.action) {
                 DragEvent.ACTION_DRAG_STARTED -> {
+                    Log.d("MainActivity", "Drag started")
                     // Check if this is an app being dragged
                     val result = event.clipDescription.hasMimeType(ClipDescription.MIMETYPE_TEXT_PLAIN)
+                    Log.d("MainActivity", "Can accept drag: $result")
                     if (result) {
                         // Show visual feedback that we can accept the drop
                         homeContainer.alpha = 0.9f
@@ -250,23 +256,27 @@ class MainActivity : AppCompatActivity() {
                 }
                 
                 DragEvent.ACTION_DRAG_ENTERED -> {
+                    Log.d("MainActivity", "Drag entered")
                     // Visual feedback when drag enters the drop zone
                     homeContainer.alpha = 0.7f
                     true
                 }
                 
                 DragEvent.ACTION_DRAG_EXITED -> {
+                    Log.d("MainActivity", "Drag exited")
                     // Remove visual feedback when drag exits
                     homeContainer.alpha = 0.9f
                     true
                 }
                 
                 DragEvent.ACTION_DROP -> {
+                    Log.d("MainActivity", "Drop detected")
                     // Handle the drop
                     val clipData = event.clipData
                     if (clipData != null && clipData.itemCount > 0) {
                         val packageName = clipData.getItemAt(0).text.toString()
                         val appObject = event.localState as? AppObject
+                        Log.d("MainActivity", "Dropping app: $packageName")
                         
                         if (appObject != null) {
                             // Create dropped app at the drop location
@@ -280,18 +290,24 @@ class MainActivity : AppCompatActivity() {
                             
                             addDroppedAppToHomeScreen(droppedApp)
                             droppedApps.add(droppedApp)
+                            Log.d("MainActivity", "App dropped successfully at (${event.x}, ${event.y})")
                             
                             // Close the app drawer after a short delay
                             handler.postDelayed({
                                 slideDownDrawer()
                             }, 200)
+                        } else {
+                            Log.e("MainActivity", "AppObject is null in drop event")
                         }
+                    } else {
+                        Log.e("MainActivity", "No clip data in drop event")
                     }
                     homeContainer.alpha = 1.0f
                     true
                 }
                 
                 DragEvent.ACTION_DRAG_ENDED -> {
+                    Log.d("MainActivity", "Drag ended")
                     // Clean up
                     homeContainer.alpha = 1.0f
                     true
@@ -303,6 +319,8 @@ class MainActivity : AppCompatActivity() {
     }
     
     private fun addDroppedAppToHomeScreen(droppedApp: DroppedApp) {
+        Log.d("MainActivity", "Adding dropped app to home screen: ${droppedApp.label}")
+        
         val appView = LayoutInflater.from(this).inflate(R.layout.home_app_item, null)
         val iconView = appView.findViewById<ImageView>(R.id.home_app_icon)
         val labelView = appView.findViewById<TextView>(R.id.home_app_label)
@@ -312,6 +330,7 @@ class MainActivity : AppCompatActivity() {
         
         // Set click listener to launch the app
         appView.setOnClickListener {
+            Log.d("MainActivity", "Launching dropped app: ${droppedApp.packageName}")
             launchApp(droppedApp.packageName)
         }
         
@@ -335,6 +354,7 @@ class MainActivity : AppCompatActivity() {
         layoutParams.topMargin = (droppedApp.y - 40).toInt()
         
         homeContainer.addView(appView, layoutParams)
+        Log.d("MainActivity", "App view added to home container")
     }
     
     private fun showRemoveAppDialog(droppedApp: DroppedApp, appView: View) {
