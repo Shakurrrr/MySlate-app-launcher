@@ -15,8 +15,6 @@ import android.widget.*
 import androidx.appcompat.app.AppCompatActivity
 import java.text.SimpleDateFormat
 import java.util.*
-import androidx.core.content.ContextCompat
-
 
 class MainActivity : AppCompatActivity() {
 
@@ -35,7 +33,6 @@ class MainActivity : AppCompatActivity() {
     private lateinit var leftPanel: View
     private lateinit var rightPanel: View
     private lateinit var gestureDetector: GestureDetector
-    private lateinit var bottomBar: LinearLayout
     private val droppedApps = mutableListOf<DroppedApp>()
 
     private val handler = Handler(Looper.getMainLooper())
@@ -47,7 +44,11 @@ class MainActivity : AppCompatActivity() {
         "com.ATS.MySlates.Parent",
         "com.ATS.MySlates",
         "com.ATS.MySlates.Teacher",
-        "com.adobe.reader"
+        "com.adobe.reader",
+        "com.android.settings",
+        "com.android.dialer",
+        "com.samsung.android.messaging",
+        "com.android.chrome"
     )
 
     private fun launchApp(packageName: String) {
@@ -96,7 +97,6 @@ class MainActivity : AppCompatActivity() {
         searchIcon = findViewById(R.id.search_icon)
         leftPanel = findViewById(R.id.left_panel)
         rightPanel = findViewById(R.id.right_panel)
-        bottomBar = findViewById(R.id.bottom_bar)
 
         gestureDetector = GestureDetector(this, object : GestureDetector.SimpleOnGestureListener() {
             override fun onDown(e: MotionEvent): Boolean {
@@ -146,6 +146,7 @@ class MainActivity : AppCompatActivity() {
         weatherText.text = "\u2600 24\u00b0"
 
         handler.post(timeRunnable)
+
         setupDragAndDrop()
 
         searchInput.setOnTouchListener { v, _ ->
@@ -153,7 +154,33 @@ class MainActivity : AppCompatActivity() {
             false
         }
 
-        loadHomeApps(bottomBar)
+        val callBtn: ImageView = findViewById(R.id.icon_call)
+        val msgBtn: ImageView= findViewById(R.id.icon_message)
+        val browserBtn: ImageView = findViewById(R.id.icon_browser)
+        val settingsBtn: ImageView = findViewById(R.id.icon_settings)
+
+        callBtn.setOnClickListener { launchApp("com.samsung.android.dialer") }
+        msgBtn.setOnClickListener { launchApp("com.samsung.android.messaging") }
+        browserBtn.setOnClickListener { launchApp("com.android.chrome") }
+        settingsBtn.setOnClickListener {
+            startActivity(Intent(Settings.ACTION_SETTINGS))
+        }
+
+        val call = findViewById<ImageView>(R.id.icon_call)
+        addTapEffect(call)
+        call.setOnClickListener { launchApp("com.android.dialer") }
+
+        val message = findViewById<ImageView>(R.id.icon_message)
+        addTapEffect(message)
+        message.setOnClickListener{launchApp("com.samsung.android.messaging")}
+
+        val browser = findViewById<ImageView>(R.id.icon_browser)
+        addTapEffect(browser)
+        browser.setOnClickListener{launchApp("com.android.chrome")}
+
+        val settings = findViewById<ImageView>(R.id.icon_settings)
+        addTapEffect(settings)
+        settings.setOnClickListener{launchApp("com.android.settings")}
 
         val pm = packageManager
         allFilteredApps = pm.getInstalledApplications(PackageManager.GET_META_DATA)
@@ -166,6 +193,22 @@ class MainActivity : AppCompatActivity() {
         adapter = AppAdapter(this, allFilteredApps)
         appGridView.adapter = adapter
 
+        findViewById<ImageView>(R.id.icon_call).setOnClickListener {
+            launchApp("com.samsung.android.dialer")
+        }
+
+        findViewById<ImageView>(R.id.icon_message).setOnClickListener {
+            launchApp("com.samsung.android.messaging")
+        }
+
+        findViewById<ImageView>(R.id.icon_browser).setOnClickListener {
+            launchApp("com.android.chrome")
+        }
+
+        findViewById<ImageView>(R.id.icon_settings).setOnClickListener {
+            launchApp("com.android.settings")
+        }
+
         searchInput.addTextChangedListener(object : android.text.TextWatcher {
             override fun afterTextChanged(s: android.text.Editable?) {}
             override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
@@ -177,55 +220,6 @@ class MainActivity : AppCompatActivity() {
             }
         })
     }
-
-    private fun loadHomeApps(container: LinearLayout) {
-        val pm = packageManager
-        allowedApps.forEach { packageName ->
-            try {
-                val appIntent = pm.getLaunchIntentForPackage(packageName)
-                val appInfo = pm.getApplicationInfo(packageName, 0)
-                val appLabel = pm.getApplicationLabel(appInfo).toString()
-                val appIcon = pm.getApplicationIcon(packageName)
-
-                val appView = LinearLayout(this).apply {
-                    orientation = LinearLayout.VERTICAL
-                    gravity = Gravity.CENTER
-                    layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply {
-                        setMargins(8, 8, 8, 8)
-                    }
-
-                    val iconView = ImageView(this@MainActivity).apply {
-                        setImageDrawable(appIcon)
-                        layoutParams = LinearLayout.LayoutParams(96, 96)
-                        scaleType = ImageView.ScaleType.CENTER_CROP
-                        background = ContextCompat.getDrawable(this@MainActivity, R.drawable.round_icon_bg)
-                        clipToOutline = true
-                    }
-
-
-                    val labelView = TextView(this@MainActivity).apply {
-                        text = appLabel
-                        textSize = 12f
-                        gravity = Gravity.CENTER
-                        setTextColor(android.graphics.Color.WHITE)
-                    }
-
-                    addView(iconView)
-                    addView(labelView)
-
-                    setOnClickListener {
-                        if (appIntent != null) startActivity(appIntent)
-                        else Toast.makeText(context, "App not installed", Toast.LENGTH_SHORT).show()
-                    }
-                }
-
-                container.addView(appView)
-            } catch (e: Exception) {
-                Log.e("Launcher", "App not found: $packageName")
-            }
-        }
-    }
-
 
 private fun setupDragAndDrop() {
         Log.d("MainActivity", "Setting up drag and drop")
