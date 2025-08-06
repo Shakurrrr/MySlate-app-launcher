@@ -228,84 +228,45 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-private fun setupDragAndDrop() {
-        Log.d("MainActivity", "Setting up drag and drop")
-
-        // Set drag listener on the root layout to catch all drag events
-        rootLayout.setOnDragListener { v, event ->
-            Log.d("MainActivity", "Drag event: ${event.action}")
-
+    private fun setupDragAndDrop() {
+        rootLayout.setOnDragListener { _, event ->
             when (event.action) {
                 DragEvent.ACTION_DRAG_STARTED -> {
-                    Log.d("MainActivity", "Drag started")
-                    val result = event.clipDescription?.hasMimeType(ClipDescription.MIMETYPE_TEXT_PLAIN) ?: false
-                    Log.d("MainActivity", "Can accept drag: $result")
-                    if (result) {
-                        homeContainer.alpha = 0.8f
-                        blurOverlay.visibility = View.VISIBLE
-                        blurOverlay.alpha = 0.3f
-                    }
-                    result
-                }
-
-                DragEvent.ACTION_DRAG_ENTERED -> {
-                    Log.d("MainActivity", "Drag entered")
-                    homeContainer.alpha = 0.6f
-                    true
-                }
-
-                DragEvent.ACTION_DRAG_EXITED -> {
-                    Log.d("MainActivity", "Drag exited")
+                    blurOverlay.visibility = View.VISIBLE
+                    blurOverlay.alpha = 0.3f
                     homeContainer.alpha = 0.8f
                     true
                 }
 
-                DragEvent.ACTION_DROP -> {
-                    Log.d("MainActivity", "Drop detected")
-                    val clipData = event.clipData
-                    if (clipData != null && clipData.itemCount > 0) {
-                        val packageName = clipData.getItemAt(0).text.toString()
-                        val appObject = event.localState as? AppObject
-                        Log.d("MainActivity", "Dropping app: $packageName")
-
-                        if (appObject != null) {
-                            val droppedApp = DroppedApp(
-                                appObject.label,
-                                appObject.icon,
-                                packageName,
-                                event.x,
-                                event.y
-                            )
-
-                            addDroppedAppToHomeScreen(droppedApp)
-                            droppedApps.add(droppedApp)
-                            Log.d("MainActivity", "App dropped successfully at (${event.x}, ${event.y})")
-
-                            handler.postDelayed({
-                                if (isDrawerOpen) {
-                                    slideDownDrawer()
-                                }
-                            }, 200)
-                        } else {
-                            Log.e("MainActivity", "AppObject is null in drop event")
-                        }
-                    } else {
-                        Log.e("MainActivity", "No clip data in drop event")
-                    }
-
-                    // Reset visual feedback
-                    homeContainer.alpha = 1.0f
-                    blurOverlay.alpha = 0f
+                DragEvent.ACTION_DRAG_ENDED -> {
                     blurOverlay.visibility = View.GONE
+                    blurOverlay.alpha = 0f
+                    homeContainer.alpha = 1f
                     true
                 }
 
-                DragEvent.ACTION_DRAG_ENDED -> {
-                    Log.d("MainActivity", "Drag ended")
-                    // Clean up visual feedback
-                    homeContainer.alpha = 1.0f
-                    blurOverlay.alpha = 0f
-                    blurOverlay.visibility = View.GONE
+                DragEvent.ACTION_DROP -> {
+                    val clipData = event.clipData
+                    val packageName = clipData?.getItemAt(0)?.text?.toString() ?: return@setOnDragListener false
+                    val appObject = event.localState as? AppObject ?: return@setOnDragListener false
+
+                    // Snap to grid (4 columns)
+                    val gridSize = dpToPx(96 + 32) // icon + margin
+                    val snappedX = ((event.x / gridSize).toInt() * gridSize).toFloat()
+                    val snappedY = ((event.y / gridSize).toInt() * gridSize).toFloat()
+
+                    // Remove existing view if already added
+                    val existing = droppedApps.find { it.packageName == packageName }
+                    if (existing != null) {
+                        existing.view?.let { homeContainer.removeView(it) }
+                        droppedApps.remove(existing)
+                    }
+
+                    // Add new view
+                    val droppedApp = DroppedApp(appObject.label, appObject.icon, packageName, snappedX, snappedY)
+                    addDroppedAppToHomeScreen(droppedApp)
+                    droppedApps.add(droppedApp)
+
                     true
                 }
 
@@ -313,45 +274,46 @@ private fun setupDragAndDrop() {
             }
         }
     }
+    private fun dpToPx(dp: Int): Int {
+        return (dp * resources.displayMetrics.density).toInt()
+    }
 
-    private fun addDroppedAppToHomeScreen(droppedApp: DroppedApp) {
-        Log.d("MainActivity", "Adding dropped app to home screen: ${droppedApp.label}")
 
-        val appView = LayoutInflater.from(this).inflate(R.layout.home_app_item, null)
-        val iconView = appView.findViewById<ImageView>(R.id.home_app_icon)
-        val labelView = appView.findViewById<TextView>(R.id.home_app_label)
+    private fun addDroppedAppToHomeScreen(app: DroppedApp) {
+        val view = LayoutInflater.from(this).inflate(R.layout.home_app_item, null)
+        val icon = view.findViewById<ImageView>(R.id.home_app_icon)
+        val label = view.findViewById<TextView>(R.id.home_app_label)
 
-        iconView.setImageDrawable(droppedApp.icon)
-        labelView.text = droppedApp.label
+        icon.setImageDrawable(app.icon)
+        label.text = app.label
 
-        // Set click listener to launch the app
-        appView.setOnClickListener {
-            Log.d("MainActivity", "Launching dropped app: ${droppedApp.packageName}")
-            launchApp(droppedApp.packageName)
-        }
-
-        // Add tap effect
-        addTapEffect(appView)
-
-        // Set up long click for removal
-        appView.setOnLongClickListener {
-            showRemoveAppDialog(droppedApp, appView)
+        // Setup drag again from home
+        view.setOnLongClickListener {
+            val clipData = ClipData.newPlainText("package", app.packageName)
+            val shadow = View.DragShadowBuilder(view)
+            view.startDragAndDrop(clipData, shadow, AppObject(app.label, app.icon, app.packageName), 0)
             true
         }
 
-        // Position the app view
+        // Setup tap
+        view.setOnClickListener {
+            launchApp(app.packageName)
+        }
+
+        // Add and store view
+        app.view = view
         val layoutParams = FrameLayout.LayoutParams(
             FrameLayout.LayoutParams.WRAP_CONTENT,
             FrameLayout.LayoutParams.WRAP_CONTENT
         )
+        layoutParams.leftMargin = app.x.toInt()
+        layoutParams.topMargin = app.y.toInt()
 
-        // Adjust position to center the view on the drop point
-        layoutParams.leftMargin = (droppedApp.x - 40).toInt() // 40dp is roughly half the icon size
-        layoutParams.topMargin = (droppedApp.y - 40).toInt()
-
-        homeContainer.addView(appView, layoutParams)
-        Log.d("MainActivity", "App view added to home container")
+        homeContainer.addView(view, layoutParams)
     }
+
+
+
 
     private fun showRemoveAppDialog(droppedApp: DroppedApp, appView: View) {
         val builder = android.app.AlertDialog.Builder(this)
