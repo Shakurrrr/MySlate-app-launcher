@@ -1,5 +1,7 @@
 package com.myslates.launcher
 
+import android.content.ClipData
+import android.content.ClipDescription
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Bundle
@@ -13,11 +15,14 @@ import android.widget.*
 import androidx.appcompat.app.AppCompatActivity
 import java.text.SimpleDateFormat
 import java.util.*
+import androidx.core.content.ContextCompat
+
 
 class MainActivity : AppCompatActivity() {
 
     private lateinit var appDrawer: View
     private lateinit var rootLayout: View
+    private lateinit var homeContainer: FrameLayout
     private lateinit var blurOverlay: View
     private lateinit var timeText: TextView
     private lateinit var dateText: TextView
@@ -30,6 +35,8 @@ class MainActivity : AppCompatActivity() {
     private lateinit var leftPanel: View
     private lateinit var rightPanel: View
     private lateinit var gestureDetector: GestureDetector
+    private lateinit var bottomBar: LinearLayout
+    private val droppedApps = mutableListOf<DroppedApp>()
 
     private val handler = Handler(Looper.getMainLooper())
     private var isDrawerOpen = false
@@ -40,11 +47,7 @@ class MainActivity : AppCompatActivity() {
         "com.ATS.MySlates.Parent",
         "com.ATS.MySlates",
         "com.ATS.MySlates.Teacher",
-        "com.adobe.reader",
-        "com.android.settings",
-        "com.android.dialer",
-        "com.samsung.android.messaging",
-        "com.android.chrome"
+        "com.adobe.reader"
     )
 
     private fun launchApp(packageName: String) {
@@ -61,7 +64,6 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-
     fun addTapEffect(view: View) {
         view.setOnTouchListener { v, event ->
             when (event.action) {
@@ -76,7 +78,6 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
@@ -85,6 +86,7 @@ class MainActivity : AppCompatActivity() {
 
         appDrawer = findViewById(R.id.app_drawer)
         rootLayout = findViewById(R.id.root_layout)
+        homeContainer = findViewById(R.id.home_container)
         blurOverlay = findViewById(R.id.blur_overlay)
         timeText = findViewById(R.id.text_time)
         dateText = findViewById(R.id.text_date)
@@ -94,6 +96,49 @@ class MainActivity : AppCompatActivity() {
         searchIcon = findViewById(R.id.search_icon)
         leftPanel = findViewById(R.id.left_panel)
         rightPanel = findViewById(R.id.right_panel)
+        bottomBar = findViewById(R.id.bottom_bar)
+
+        gestureDetector = GestureDetector(this, object : GestureDetector.SimpleOnGestureListener() {
+            override fun onDown(e: MotionEvent): Boolean {
+                downX = e.x
+                downY = e.y
+                return true
+            }
+
+            override fun onScroll(e1: MotionEvent?, e2: MotionEvent, distanceX: Float, distanceY: Float): Boolean {
+                if (e1 == null || e2 == null) return false
+                val deltaX = e2.x - e1.x
+                val deltaY = e2.y - e1.y
+
+                if (Math.abs(deltaY) > Math.abs(deltaX)) {
+                    if (deltaY > 150 && isDrawerOpen) {
+                        slideDownDrawer()
+                        return true
+                    } else if (deltaY < -150 && !isDrawerOpen) {
+                        slideUpDrawer()
+                        return true
+                    }
+                } else {
+                    if (deltaX < -150) {
+                        if (leftPanel.visibility == View.VISIBLE) hidePanels() else showRightPanel()
+                        return true
+                    } else if (deltaX > 150) {
+                        if (rightPanel.visibility == View.VISIBLE) hidePanels() else showLeftPanel()
+                        return true
+                    }
+                }
+                return false
+            }
+        })
+
+        val forwardTouchListener = View.OnTouchListener { _, event ->
+            gestureDetector.onTouchEvent(event)
+            true
+        }
+
+        listOf(rootLayout, appDrawer, homeContainer, leftPanel, rightPanel, appGridView).forEach {
+            it.setOnTouchListener(forwardTouchListener)
+        }
 
         appDrawer.post { appDrawer.translationY = appDrawer.height.toFloat() }
         blurOverlay.alpha = 0f
@@ -101,56 +146,14 @@ class MainActivity : AppCompatActivity() {
         weatherText.text = "\u2600 24\u00b0"
 
         handler.post(timeRunnable)
+        setupDragAndDrop()
 
-        searchInput.setOnTouchListener { v, event ->
+        searchInput.setOnTouchListener { v, _ ->
             v.parent.requestDisallowInterceptTouchEvent(true)
             false
         }
 
-        val callBtn: ImageView = findViewById(R.id.icon_call)
-        val msgBtn: ImageView= findViewById(R.id.icon_message)
-        val browserBtn: ImageView = findViewById(R.id.icon_browser)
-        val settingsBtn: ImageView = findViewById(R.id.icon_settings)
-
-        callBtn.setOnClickListener { launchApp("com.samsung.android.dialer") }
-        msgBtn.setOnClickListener { launchApp("com.samsung.android.messaging") }
-        browserBtn.setOnClickListener { launchApp("com.android.chrome") }
-        settingsBtn.setOnClickListener {
-            startActivity(Intent(Settings.ACTION_SETTINGS))
-        }
-
-
-        val call = findViewById<ImageView>(R.id.icon_call)
-        addTapEffect(call)
-        call.setOnClickListener { launchApp("com.android.dialer") }
-
-
-        val message = findViewById<ImageView>(R.id.icon_message)
-        addTapEffect(message)
-            message.setOnClickListener{launchApp("com.samsung.android.messaging")
-        }
-
-        val browser = findViewById<ImageView>(R.id.icon_browser)
-        addTapEffect(browser)
-        browser.setOnClickListener{launchApp("com.android.chrome") }
-
-        val settings = findViewById<ImageView>(R.id.icon_settings)
-        addTapEffect(settings)
-        settings.setOnClickListener{launchApp("com.android.settings")
-        }
-
-
-        val forwardTouchListener = View.OnTouchListener { _, event ->
-            gestureDetector.onTouchEvent(event)
-            true
-        }
-
-        rootLayout.setOnTouchListener(forwardTouchListener)
-        appDrawer.setOnTouchListener(forwardTouchListener)
-        appGridView.setOnTouchListener(forwardTouchListener)
-        searchIcon.setOnTouchListener(forwardTouchListener)
-        leftPanel.setOnTouchListener(forwardTouchListener)
-        rightPanel.setOnTouchListener(forwardTouchListener)
+        loadHomeApps(bottomBar)
 
         val pm = packageManager
         allFilteredApps = pm.getInstalledApplications(PackageManager.GET_META_DATA)
@@ -163,23 +166,6 @@ class MainActivity : AppCompatActivity() {
         adapter = AppAdapter(this, allFilteredApps)
         appGridView.adapter = adapter
 
-        findViewById<ImageView>(R.id.icon_call).setOnClickListener {
-            launchApp("com.samsung.android.dialer")
-        }
-
-        findViewById<ImageView>(R.id.icon_message).setOnClickListener {
-            launchApp("com.samsung.android.messaging")
-        }
-
-        findViewById<ImageView>(R.id.icon_browser).setOnClickListener {
-            launchApp("com.android.chrome")
-        }
-
-        findViewById<ImageView>(R.id.icon_settings).setOnClickListener {
-            launchApp("com.android.settings")
-        }
-
-
         searchInput.addTextChangedListener(object : android.text.TextWatcher {
             override fun afterTextChanged(s: android.text.Editable?) {}
             override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
@@ -190,42 +176,192 @@ class MainActivity : AppCompatActivity() {
                 adapter.updateData(filtered)
             }
         })
+    }
 
-        gestureDetector = GestureDetector(this, object : GestureDetector.SimpleOnGestureListener() {
-            override fun onDown(e: MotionEvent): Boolean {
-                downX = e.x
-                downY = e.y
-                return true
-            }
+    private fun loadHomeApps(container: LinearLayout) {
+        val pm = packageManager
+        allowedApps.forEach { packageName ->
+            try {
+                val appIntent = pm.getLaunchIntentForPackage(packageName)
+                val appInfo = pm.getApplicationInfo(packageName, 0)
+                val appLabel = pm.getApplicationLabel(appInfo).toString()
+                val appIcon = pm.getApplicationIcon(packageName)
 
-            override fun onFling(e1: MotionEvent?, e2: MotionEvent, velocityX: Float, velocityY: Float): Boolean {
-                if (e1 == null || e2 == null) return false
-                val deltaX = e2.x - e1.x
-                val deltaY = e2.y - e1.y
+                val appView = LinearLayout(this).apply {
+                    orientation = LinearLayout.VERTICAL
+                    gravity = Gravity.CENTER
+                    layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply {
+                        setMargins(8, 8, 8, 8)
+                    }
 
-                return when {
-                    deltaY < -150 -> {
-                        if (!isDrawerOpen) slideUpDrawer()
-                        true
+                    val iconView = ImageView(this@MainActivity).apply {
+                        setImageDrawable(appIcon)
+                        layoutParams = LinearLayout.LayoutParams(96, 96)
+                        scaleType = ImageView.ScaleType.CENTER_CROP
+                        background = ContextCompat.getDrawable(this@MainActivity, R.drawable.round_icon_bg)
+                        clipToOutline = true
                     }
-                    deltaY > 150 && isDrawerOpen -> {
-                        slideDownDrawer()
-                        true
+
+
+                    val labelView = TextView(this@MainActivity).apply {
+                        text = appLabel
+                        textSize = 12f
+                        gravity = Gravity.CENTER
+                        setTextColor(android.graphics.Color.WHITE)
                     }
-                    deltaX < -150 -> {
-                        if (leftPanel.visibility == View.VISIBLE) hidePanels()
-                        else showRightPanel()
-                        true
+
+                    addView(iconView)
+                    addView(labelView)
+
+                    setOnClickListener {
+                        if (appIntent != null) startActivity(appIntent)
+                        else Toast.makeText(context, "App not installed", Toast.LENGTH_SHORT).show()
                     }
-                    deltaX > 150 -> {
-                        if (rightPanel.visibility == View.VISIBLE) hidePanels()
-                        else showLeftPanel()
-                        true
-                    }
-                    else -> false
                 }
+
+                container.addView(appView)
+            } catch (e: Exception) {
+                Log.e("Launcher", "App not found: $packageName")
             }
-        })
+        }
+    }
+
+
+private fun setupDragAndDrop() {
+        Log.d("MainActivity", "Setting up drag and drop")
+
+        // Set drag listener on the root layout to catch all drag events
+        rootLayout.setOnDragListener { v, event ->
+            Log.d("MainActivity", "Drag event: ${event.action}")
+
+            when (event.action) {
+                DragEvent.ACTION_DRAG_STARTED -> {
+                    Log.d("MainActivity", "Drag started")
+                    val result = event.clipDescription?.hasMimeType(ClipDescription.MIMETYPE_TEXT_PLAIN) ?: false
+                    Log.d("MainActivity", "Can accept drag: $result")
+                    if (result) {
+                        homeContainer.alpha = 0.8f
+                        blurOverlay.visibility = View.VISIBLE
+                        blurOverlay.alpha = 0.3f
+                    }
+                    result
+                }
+
+                DragEvent.ACTION_DRAG_ENTERED -> {
+                    Log.d("MainActivity", "Drag entered")
+                    homeContainer.alpha = 0.6f
+                    true
+                }
+
+                DragEvent.ACTION_DRAG_EXITED -> {
+                    Log.d("MainActivity", "Drag exited")
+                    homeContainer.alpha = 0.8f
+                    true
+                }
+
+                DragEvent.ACTION_DROP -> {
+                    Log.d("MainActivity", "Drop detected")
+                    val clipData = event.clipData
+                    if (clipData != null && clipData.itemCount > 0) {
+                        val packageName = clipData.getItemAt(0).text.toString()
+                        val appObject = event.localState as? AppObject
+                        Log.d("MainActivity", "Dropping app: $packageName")
+
+                        if (appObject != null) {
+                            val droppedApp = DroppedApp(
+                                appObject.label,
+                                appObject.icon,
+                                packageName,
+                                event.x,
+                                event.y
+                            )
+
+                            addDroppedAppToHomeScreen(droppedApp)
+                            droppedApps.add(droppedApp)
+                            Log.d("MainActivity", "App dropped successfully at (${event.x}, ${event.y})")
+
+                            handler.postDelayed({
+                                if (isDrawerOpen) {
+                                    slideDownDrawer()
+                                }
+                            }, 200)
+                        } else {
+                            Log.e("MainActivity", "AppObject is null in drop event")
+                        }
+                    } else {
+                        Log.e("MainActivity", "No clip data in drop event")
+                    }
+
+                    // Reset visual feedback
+                    homeContainer.alpha = 1.0f
+                    blurOverlay.alpha = 0f
+                    blurOverlay.visibility = View.GONE
+                    true
+                }
+
+                DragEvent.ACTION_DRAG_ENDED -> {
+                    Log.d("MainActivity", "Drag ended")
+                    // Clean up visual feedback
+                    homeContainer.alpha = 1.0f
+                    blurOverlay.alpha = 0f
+                    blurOverlay.visibility = View.GONE
+                    true
+                }
+
+                else -> false
+            }
+        }
+    }
+
+    private fun addDroppedAppToHomeScreen(droppedApp: DroppedApp) {
+        Log.d("MainActivity", "Adding dropped app to home screen: ${droppedApp.label}")
+
+        val appView = LayoutInflater.from(this).inflate(R.layout.home_app_item, null)
+        val iconView = appView.findViewById<ImageView>(R.id.home_app_icon)
+        val labelView = appView.findViewById<TextView>(R.id.home_app_label)
+
+        iconView.setImageDrawable(droppedApp.icon)
+        labelView.text = droppedApp.label
+
+        // Set click listener to launch the app
+        appView.setOnClickListener {
+            Log.d("MainActivity", "Launching dropped app: ${droppedApp.packageName}")
+            launchApp(droppedApp.packageName)
+        }
+
+        // Add tap effect
+        addTapEffect(appView)
+
+        // Set up long click for removal
+        appView.setOnLongClickListener {
+            showRemoveAppDialog(droppedApp, appView)
+            true
+        }
+
+        // Position the app view
+        val layoutParams = FrameLayout.LayoutParams(
+            FrameLayout.LayoutParams.WRAP_CONTENT,
+            FrameLayout.LayoutParams.WRAP_CONTENT
+        )
+
+        // Adjust position to center the view on the drop point
+        layoutParams.leftMargin = (droppedApp.x - 40).toInt() // 40dp is roughly half the icon size
+        layoutParams.topMargin = (droppedApp.y - 40).toInt()
+
+        homeContainer.addView(appView, layoutParams)
+        Log.d("MainActivity", "App view added to home container")
+    }
+
+    private fun showRemoveAppDialog(droppedApp: DroppedApp, appView: View) {
+        val builder = android.app.AlertDialog.Builder(this)
+        builder.setTitle("Remove App")
+        builder.setMessage("Remove ${droppedApp.label} from home screen?")
+        builder.setPositiveButton("Remove") { _, _ ->
+            homeContainer.removeView(appView)
+            droppedApps.remove(droppedApp)
+        }
+        builder.setNegativeButton("Cancel", null)
+        builder.show()
     }
 
     fun openSettings(view: View) {
