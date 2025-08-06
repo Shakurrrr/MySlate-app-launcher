@@ -65,7 +65,6 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-
     fun addTapEffect(view: View) {
         view.setOnTouchListener { v, event ->
             when (event.action) {
@@ -79,7 +78,6 @@ class MainActivity : AppCompatActivity() {
             false
         }
     }
-
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -100,17 +98,58 @@ class MainActivity : AppCompatActivity() {
         leftPanel = findViewById(R.id.left_panel)
         rightPanel = findViewById(R.id.right_panel)
 
+        gestureDetector = GestureDetector(this, object : GestureDetector.SimpleOnGestureListener() {
+            override fun onDown(e: MotionEvent): Boolean {
+                downX = e.x
+                downY = e.y
+                return true
+            }
+
+            override fun onScroll(e1: MotionEvent?, e2: MotionEvent, distanceX: Float, distanceY: Float): Boolean {
+                if (e1 == null || e2 == null) return false
+                val deltaX = e2.x - e1.x
+                val deltaY = e2.y - e1.y
+
+                if (Math.abs(deltaY) > Math.abs(deltaX)) {
+                    if (deltaY > 150 && isDrawerOpen) {
+                        slideDownDrawer()
+                        return true
+                    } else if (deltaY < -150 && !isDrawerOpen) {
+                        slideUpDrawer()
+                        return true
+                    }
+                } else {
+                    if (deltaX < -150) {
+                        if (leftPanel.visibility == View.VISIBLE) hidePanels() else showRightPanel()
+                        return true
+                    } else if (deltaX > 150) {
+                        if (rightPanel.visibility == View.VISIBLE) hidePanels() else showLeftPanel()
+                        return true
+                    }
+                }
+                return false
+            }
+        })
+
+        val forwardTouchListener = View.OnTouchListener { _, event ->
+            gestureDetector.onTouchEvent(event)
+            true
+        }
+
+        listOf(rootLayout, appDrawer, homeContainer, leftPanel, rightPanel, appGridView).forEach {
+            it.setOnTouchListener(forwardTouchListener)
+        }
+
         appDrawer.post { appDrawer.translationY = appDrawer.height.toFloat() }
         blurOverlay.alpha = 0f
         blurOverlay.visibility = View.GONE
         weatherText.text = "\u2600 24\u00b0"
 
         handler.post(timeRunnable)
-        
-        // Set up drag and drop for the home screen
+
         setupDragAndDrop()
 
-        searchInput.setOnTouchListener { v, event ->
+        searchInput.setOnTouchListener { v, _ ->
             v.parent.requestDisallowInterceptTouchEvent(true)
             false
         }
@@ -127,33 +166,21 @@ class MainActivity : AppCompatActivity() {
             startActivity(Intent(Settings.ACTION_SETTINGS))
         }
 
-
         val call = findViewById<ImageView>(R.id.icon_call)
         addTapEffect(call)
         call.setOnClickListener { launchApp("com.android.dialer") }
 
-
         val message = findViewById<ImageView>(R.id.icon_message)
         addTapEffect(message)
-            message.setOnClickListener{launchApp("com.samsung.android.messaging")
-        }
+        message.setOnClickListener{launchApp("com.samsung.android.messaging")}
 
         val browser = findViewById<ImageView>(R.id.icon_browser)
         addTapEffect(browser)
-        browser.setOnClickListener{launchApp("com.android.chrome") }
+        browser.setOnClickListener{launchApp("com.android.chrome")}
 
         val settings = findViewById<ImageView>(R.id.icon_settings)
         addTapEffect(settings)
-        settings.setOnClickListener{launchApp("com.android.settings")
-        }
-
-
-        val forwardTouchListener = View.OnTouchListener { _, event ->
-            gestureDetector.onTouchEvent(event)
-            true
-        }
-
-        rootLayout.setOnTouchListener(forwardTouchListener)
+        settings.setOnClickListener{launchApp("com.android.settings")}
 
         val pm = packageManager
         allFilteredApps = pm.getInstalledApplications(PackageManager.GET_META_DATA)
@@ -182,7 +209,6 @@ class MainActivity : AppCompatActivity() {
             launchApp("com.android.settings")
         }
 
-
         searchInput.addTextChangedListener(object : android.text.TextWatcher {
             override fun afterTextChanged(s: android.text.Editable?) {}
             override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
@@ -193,57 +219,15 @@ class MainActivity : AppCompatActivity() {
                 adapter.updateData(filtered)
             }
         })
-
-        gestureDetector = GestureDetector(this, object : GestureDetector.SimpleOnGestureListener() {
-            override fun onDown(e: MotionEvent): Boolean {
-                downX = e.x
-                downY = e.y
-                return true
-            }
-
-            override fun onFling(e1: MotionEvent?, e2: MotionEvent, velocityX: Float, velocityY: Float): Boolean {
-                if (e1 == null || e2 == null) return false
-                
-                // Don't process gestures if we're in the app drawer area
-                if (isDrawerOpen && e1.y > (rootLayout.height * 0.3f)) {
-                    return false
-                }
-                
-                val deltaX = e2.x - e1.x
-                val deltaY = e2.y - e1.y
-
-                return when {
-                    deltaY < -150 -> {
-                        if (!isDrawerOpen) slideUpDrawer()
-                        true
-                    }
-                    deltaY > 150 && isDrawerOpen -> {
-                        slideDownDrawer()
-                        true
-                    }
-                    deltaX < -150 -> {
-                        if (leftPanel.visibility == View.VISIBLE) hidePanels()
-                        else showRightPanel()
-                        true
-                    }
-                    deltaX > 150 -> {
-                        if (rightPanel.visibility == View.VISIBLE) hidePanels()
-                        else showLeftPanel()
-                        true
-                    }
-                    else -> false
-                }
-            }
-        })
     }
-    
-    private fun setupDragAndDrop() {
+
+private fun setupDragAndDrop() {
         Log.d("MainActivity", "Setting up drag and drop")
-        
+
         // Set drag listener on the root layout to catch all drag events
         rootLayout.setOnDragListener { v, event ->
             Log.d("MainActivity", "Drag event: ${event.action}")
-            
+
             when (event.action) {
                 DragEvent.ACTION_DRAG_STARTED -> {
                     Log.d("MainActivity", "Drag started")
@@ -256,19 +240,19 @@ class MainActivity : AppCompatActivity() {
                     }
                     result
                 }
-                
+
                 DragEvent.ACTION_DRAG_ENTERED -> {
                     Log.d("MainActivity", "Drag entered")
                     homeContainer.alpha = 0.6f
                     true
                 }
-                
+
                 DragEvent.ACTION_DRAG_EXITED -> {
                     Log.d("MainActivity", "Drag exited")
                     homeContainer.alpha = 0.8f
                     true
                 }
-                
+
                 DragEvent.ACTION_DROP -> {
                     Log.d("MainActivity", "Drop detected")
                     val clipData = event.clipData
@@ -276,7 +260,7 @@ class MainActivity : AppCompatActivity() {
                         val packageName = clipData.getItemAt(0).text.toString()
                         val appObject = event.localState as? AppObject
                         Log.d("MainActivity", "Dropping app: $packageName")
-                        
+
                         if (appObject != null) {
                             val droppedApp = DroppedApp(
                                 appObject.label,
@@ -285,11 +269,11 @@ class MainActivity : AppCompatActivity() {
                                 event.x,
                                 event.y
                             )
-                            
+
                             addDroppedAppToHomeScreen(droppedApp)
                             droppedApps.add(droppedApp)
                             Log.d("MainActivity", "App dropped successfully at (${event.x}, ${event.y})")
-                            
+
                             handler.postDelayed({
                                 if (isDrawerOpen) {
                                     slideDownDrawer()
@@ -301,14 +285,14 @@ class MainActivity : AppCompatActivity() {
                     } else {
                         Log.e("MainActivity", "No clip data in drop event")
                     }
-                    
+
                     // Reset visual feedback
                     homeContainer.alpha = 1.0f
                     blurOverlay.alpha = 0f
                     blurOverlay.visibility = View.GONE
                     true
                 }
-                
+
                 DragEvent.ACTION_DRAG_ENDED -> {
                     Log.d("MainActivity", "Drag ended")
                     // Clean up visual feedback
@@ -317,51 +301,51 @@ class MainActivity : AppCompatActivity() {
                     blurOverlay.visibility = View.GONE
                     true
                 }
-                
+
                 else -> false
             }
         }
     }
-    
+
     private fun addDroppedAppToHomeScreen(droppedApp: DroppedApp) {
         Log.d("MainActivity", "Adding dropped app to home screen: ${droppedApp.label}")
-        
+
         val appView = LayoutInflater.from(this).inflate(R.layout.home_app_item, null)
         val iconView = appView.findViewById<ImageView>(R.id.home_app_icon)
         val labelView = appView.findViewById<TextView>(R.id.home_app_label)
-        
+
         iconView.setImageDrawable(droppedApp.icon)
         labelView.text = droppedApp.label
-        
+
         // Set click listener to launch the app
         appView.setOnClickListener {
             Log.d("MainActivity", "Launching dropped app: ${droppedApp.packageName}")
             launchApp(droppedApp.packageName)
         }
-        
+
         // Add tap effect
         addTapEffect(appView)
-        
+
         // Set up long click for removal
         appView.setOnLongClickListener {
             showRemoveAppDialog(droppedApp, appView)
             true
         }
-        
+
         // Position the app view
         val layoutParams = FrameLayout.LayoutParams(
             FrameLayout.LayoutParams.WRAP_CONTENT,
             FrameLayout.LayoutParams.WRAP_CONTENT
         )
-        
+
         // Adjust position to center the view on the drop point
         layoutParams.leftMargin = (droppedApp.x - 40).toInt() // 40dp is roughly half the icon size
         layoutParams.topMargin = (droppedApp.y - 40).toInt()
-        
+
         homeContainer.addView(appView, layoutParams)
         Log.d("MainActivity", "App view added to home container")
     }
-    
+
     private fun showRemoveAppDialog(droppedApp: DroppedApp, appView: View) {
         val builder = android.app.AlertDialog.Builder(this)
         builder.setTitle("Remove App")
