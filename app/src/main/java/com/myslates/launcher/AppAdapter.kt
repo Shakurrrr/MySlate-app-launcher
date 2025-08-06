@@ -69,29 +69,31 @@ class AppAdapter(private val context: Context, private var apps: List<AppObject>
     private fun startDragAndDrop(view: View, app: AppObject) {
         Log.d("AppAdapter", "Starting drag for ${app.label}")
         
-        val dragData = ClipData.newPlainText("app_package", app.packageName)
+        // Create clip data with the package name
+        val item = ClipData.Item(app.packageName)
+        val dragData = ClipData("app_data", arrayOf(ClipDescription.MIMETYPE_TEXT_PLAIN), item)
         
-        // Create a custom drag shadow
+        // Create drag shadow
         val dragShadowBuilder = object : View.DragShadowBuilder(view) {
             override fun onProvideShadowMetrics(size: android.graphics.Point, touch: android.graphics.Point) {
-                val width = view.width
-                val height = view.height
+                val width = (view.width * 0.8f).toInt()
+                val height = (view.height * 0.8f).toInt()
                 size.set(width, height)
                 touch.set(width / 2, height / 2)
             }
         }
         
-        // Start drag and drop
-        val result = view.startDragAndDrop(dragData, dragShadowBuilder, app, 0)
+        // Start drag and drop with the app object as local state
+        val result = view.startDragAndDrop(dragData, dragShadowBuilder, app, View.DRAG_FLAG_GLOBAL)
         Log.d("AppAdapter", "Drag started: $result")
         
-        // Add haptic feedback
-        view.setOnTouchListener { v, event ->
-            // Allow normal touch handling
-            false
+        if (result) {
+            // Add haptic feedback
+            view.performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS)
+            Log.d("AppAdapter", "Haptic feedback triggered")
+        } else {
+            Log.e("AppAdapter", "Failed to start drag and drop")
         }
-        
-        view.performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS)
     }
 
     private fun launchApp(packageName: String) {

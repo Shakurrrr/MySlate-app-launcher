@@ -154,11 +154,6 @@ class MainActivity : AppCompatActivity() {
         }
 
         rootLayout.setOnTouchListener(forwardTouchListener)
-        appDrawer.setOnTouchListener(forwardTouchListener)
-        appGridView.setOnTouchListener(forwardTouchListener)
-        searchIcon.setOnTouchListener(forwardTouchListener)
-        leftPanel.setOnTouchListener(forwardTouchListener)
-        rightPanel.setOnTouchListener(forwardTouchListener)
 
         val pm = packageManager
         allFilteredApps = pm.getInstalledApplications(PackageManager.GET_META_DATA)
@@ -208,6 +203,12 @@ class MainActivity : AppCompatActivity() {
 
             override fun onFling(e1: MotionEvent?, e2: MotionEvent, velocityX: Float, velocityY: Float): Boolean {
                 if (e1 == null || e2 == null) return false
+                
+                // Don't process gestures if we're in the app drawer area
+                if (isDrawerOpen && e1.y > (rootLayout.height * 0.3f)) {
+                    return false
+                }
+                
                 val deltaX = e2.x - e1.x
                 val deltaY = e2.y - e1.y
 
@@ -239,39 +240,37 @@ class MainActivity : AppCompatActivity() {
     private fun setupDragAndDrop() {
         Log.d("MainActivity", "Setting up drag and drop")
         
-        homeContainer.setOnDragListener { v, event ->
+        // Set drag listener on the root layout to catch all drag events
+        rootLayout.setOnDragListener { v, event ->
             Log.d("MainActivity", "Drag event: ${event.action}")
             
             when (event.action) {
                 DragEvent.ACTION_DRAG_STARTED -> {
                     Log.d("MainActivity", "Drag started")
-                    // Check if this is an app being dragged
-                    val result = event.clipDescription.hasMimeType(ClipDescription.MIMETYPE_TEXT_PLAIN)
+                    val result = event.clipDescription?.hasMimeType(ClipDescription.MIMETYPE_TEXT_PLAIN) ?: false
                     Log.d("MainActivity", "Can accept drag: $result")
                     if (result) {
-                        // Show visual feedback that we can accept the drop
-                        homeContainer.alpha = 0.9f
+                        homeContainer.alpha = 0.8f
+                        blurOverlay.visibility = View.VISIBLE
+                        blurOverlay.alpha = 0.3f
                     }
                     result
                 }
                 
                 DragEvent.ACTION_DRAG_ENTERED -> {
                     Log.d("MainActivity", "Drag entered")
-                    // Visual feedback when drag enters the drop zone
-                    homeContainer.alpha = 0.7f
+                    homeContainer.alpha = 0.6f
                     true
                 }
                 
                 DragEvent.ACTION_DRAG_EXITED -> {
                     Log.d("MainActivity", "Drag exited")
-                    // Remove visual feedback when drag exits
-                    homeContainer.alpha = 0.9f
+                    homeContainer.alpha = 0.8f
                     true
                 }
                 
                 DragEvent.ACTION_DROP -> {
                     Log.d("MainActivity", "Drop detected")
-                    // Handle the drop
                     val clipData = event.clipData
                     if (clipData != null && clipData.itemCount > 0) {
                         val packageName = clipData.getItemAt(0).text.toString()
@@ -279,7 +278,6 @@ class MainActivity : AppCompatActivity() {
                         Log.d("MainActivity", "Dropping app: $packageName")
                         
                         if (appObject != null) {
-                            // Create dropped app at the drop location
                             val droppedApp = DroppedApp(
                                 appObject.label,
                                 appObject.icon,
@@ -292,9 +290,10 @@ class MainActivity : AppCompatActivity() {
                             droppedApps.add(droppedApp)
                             Log.d("MainActivity", "App dropped successfully at (${event.x}, ${event.y})")
                             
-                            // Close the app drawer after a short delay
                             handler.postDelayed({
-                                slideDownDrawer()
+                                if (isDrawerOpen) {
+                                    slideDownDrawer()
+                                }
                             }, 200)
                         } else {
                             Log.e("MainActivity", "AppObject is null in drop event")
@@ -302,14 +301,20 @@ class MainActivity : AppCompatActivity() {
                     } else {
                         Log.e("MainActivity", "No clip data in drop event")
                     }
+                    
+                    // Reset visual feedback
                     homeContainer.alpha = 1.0f
+                    blurOverlay.alpha = 0f
+                    blurOverlay.visibility = View.GONE
                     true
                 }
                 
                 DragEvent.ACTION_DRAG_ENDED -> {
                     Log.d("MainActivity", "Drag ended")
-                    // Clean up
+                    // Clean up visual feedback
                     homeContainer.alpha = 1.0f
+                    blurOverlay.alpha = 0f
+                    blurOverlay.visibility = View.GONE
                     true
                 }
                 
