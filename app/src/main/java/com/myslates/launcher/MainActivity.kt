@@ -119,26 +119,33 @@ class MainActivity : AppCompatActivity() {
     private fun setupGestureDetection() {
         gestureDetector = GestureDetector(this, object : GestureDetector.SimpleOnGestureListener() {
             override fun onDown(e: MotionEvent): Boolean = true
+            // ready to remove
+            val SWIPE_MIN_DISTANCE = 150
+            val SWIPE_THRESHOLD_VELOCITY = 100
+
 
             override fun onScroll(e1: MotionEvent?, e2: MotionEvent, distanceX: Float, distanceY: Float): Boolean {
-                if (e1 == null || e2 == null || isDragging) return false
-
+                if (e1 == null || e2 == null) return false
                 val deltaX = e2.x - e1.x
                 val deltaY = e2.y - e1.y
 
-                // Vertical gestures (drawer)
-                if (Math.abs(deltaY) > Math.abs(deltaX) && Math.abs(deltaY) > 150) {
-                    if (deltaY > 0 && isDrawerOpen) {
-                        slideDownDrawer()
-                        return true
-                    } else if (deltaY < 0 && !isDrawerOpen) {
+                Log.d("GestureSwipe", "deltaY=$deltaY, deltaX=$deltaX, isDrawerOpen=$isDrawerOpen")
+
+                if (Math.abs(deltaY) > Math.abs(deltaX) && Math.abs(deltaY) > 50) {
+                    if (deltaY < 0 && !isDrawerOpen) {
+                        Log.d("GestureSwipe", "Swipe up detected → Opening drawer")
                         slideUpDrawer()
+                        return true
+                    } else if (deltaY > 0 && isDrawerOpen) {
+                        Log.d("GestureSwipe", "Swipe down detected → Closing drawer")
+                        slideDownDrawer()
                         return true
                     }
                 }
 
+
                 // Horizontal gestures (side panels)
-                if (Math.abs(deltaX) > Math.abs(deltaY) && Math.abs(deltaX) > 150) {
+                if (Math.abs(deltaX) > Math.abs(deltaY) && Math.abs(deltaX) > 50) {
                     if (deltaX < 0) {
                         if (leftPanel.visibility == View.VISIBLE) hidePanels() else showRightPanel()
                         return true
@@ -160,6 +167,23 @@ class MainActivity : AppCompatActivity() {
 
         rootLayout.setOnTouchListener(touchListener)
         homeContainer.setOnTouchListener(touchListener)
+
+
+        // ready to remove
+        val forwardTouchListener = View.OnTouchListener { _, event ->
+            gestureDetector.onTouchEvent(event)
+            false
+        }
+
+        listOf(
+            rootLayout,
+            homeContainer,
+            blurOverlay,
+            findViewById(R.id.home_grid_recycler)
+        ).forEach {
+            it.setOnTouchListener(forwardTouchListener)
+        }
+
     }
 
     private fun setupHomeGrid() {
@@ -484,11 +508,17 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun slideUpDrawer() {
+        Log.d("DrawerSlide", "slideUpDrawer called, isDrawerOpen: $isDrawerOpen")
+
         if (!isFinishing && !isDestroyed) {
+            Log.d("DrawerSlide", "Starting drawer animation")
             appDrawer.animate()
                 .translationY(0f)
                 .setDuration(300)
                 .setInterpolator(AccelerateDecelerateInterpolator())
+                .withEndAction {
+                    Log.d("DrawerSlide", "Drawer animation complete")
+                }
                 .start()
 
             blurOverlay.visibility = View.VISIBLE
@@ -496,7 +526,6 @@ class MainActivity : AppCompatActivity() {
             isDrawerOpen = true
         }
     }
-
     private fun slideDownDrawer() {
         if (!isFinishing && !isDestroyed) {
             appDrawer.animate()
