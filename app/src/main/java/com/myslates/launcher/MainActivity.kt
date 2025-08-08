@@ -183,6 +183,7 @@ class MainActivity : AppCompatActivity() {
                     showDragFeedback()
 
                     if (isDrawerOpen) slideDownDrawerForDrop()
+                    Log.d("MainActivity", "DRAG STARTED - type=${event.clipDescription?.label}")
                     true
                 }
 
@@ -212,29 +213,32 @@ class MainActivity : AppCompatActivity() {
         // Dedicated drop handler for REMOVE zone
         removeAppZone.setOnDragListener { _, event ->
             val dragData = event.localState as? DragData
+            if (dragData?.isFromHomeScreen == true && dragData.originalPosition >= 0) {
+                homeScreenApps[dragData.originalPosition] = null
+                homeGridAdapter.notifyItemChanged(dragData.originalPosition)
+            }
+
 
             when (event.action) {
                 DragEvent.ACTION_DRAG_ENTERED -> {
-                    removeAppZone.setBackgroundColor(Color.parseColor("#B00020")) // Danger red
-                    removeAppZone.alpha = 1.0f
+                    removeAppZone.setBackgroundColor(Color.RED)
+                    removeAppZone.alpha = 1f
                     true
                 }
 
                 DragEvent.ACTION_DRAG_EXITED -> {
                     removeAppZone.setBackgroundColor(Color.TRANSPARENT)
-                    removeAppZone.alpha = 0.8f
+                    removeAppZone.alpha = 0.7f
                     true
                 }
 
                 DragEvent.ACTION_DROP -> {
                     if (dragData != null && dragData.isFromHomeScreen) {
-                        val position = dragData.originalPosition
-                        if (position in homeScreenApps.indices) {
-                            val removedLabel = homeScreenApps[position]?.label ?: "App"
-                            homeScreenApps[position] = null
-                            homeGridAdapter.notifyItemChanged(position)
-                            Toast.makeText(this, "$removedLabel removed", Toast.LENGTH_SHORT).show()
-                            Log.d("MainActivity", "Removed app from position $position")
+                        val pos = dragData.originalPosition
+                        if (pos in homeScreenApps.indices) {
+                            homeScreenApps[pos] = null
+                            homeGridAdapter.notifyItemChanged(pos)
+                            Toast.makeText(this, "${dragData.app.label} removed", Toast.LENGTH_SHORT).show()
                         }
                     }
                     true
@@ -242,14 +246,17 @@ class MainActivity : AppCompatActivity() {
 
                 DragEvent.ACTION_DRAG_ENDED -> {
                     removeAppZone.setBackgroundColor(Color.TRANSPARENT)
-                    removeAppZone.alpha = 0.8f
+                    removeAppZone.alpha = 0.7f
                     true
                 }
 
                 else -> false
             }
         }
+
     }
+
+
 
 
     private fun showDragFeedback() {
@@ -308,35 +315,22 @@ class MainActivity : AppCompatActivity() {
 
 
     private fun handleAppDrop(position: Int, app: AppObject): Boolean {
-        Log.d("MainActivity", "Handling app drop at position $position for ${app.label}")
+        Log.d("MainActivity", "Dropping app ${app.label} to position $position")
 
-        // Check if position is valid
-        if (position < 0 || position >= homeScreenApps.size) {
-            Log.e("MainActivity", "Invalid drop position: $position")
-            return false
-        }
+        if (position !in homeScreenApps.indices) return false
 
-
-        // If slot is occupied, find next empty slot
+        // Find free slot if occupied
         var targetPosition = position
         if (homeScreenApps[targetPosition] != null) {
             targetPosition = findNextEmptySlot(position)
-            if (targetPosition == -1) {
-                Toast.makeText(this, "No empty slots available", Toast.LENGTH_SHORT).show()
-                return false
-            }
+            if (targetPosition == -1) return false
         }
 
-        // Place app in new position
         homeScreenApps[targetPosition] = app
         homeGridAdapter.notifyItemChanged(targetPosition)
-        homeGridRecyclerView.post {
-            homeGridAdapter.notifyDataSetChanged()
-        }
-
-        Log.d("MainActivity", "App ${app.label} placed at position $targetPosition")
         return true
     }
+
 
 
     private fun findNextEmptySlot(startPosition: Int): Int {
@@ -412,7 +406,8 @@ class MainActivity : AppCompatActivity() {
         val clipData = ClipData.newPlainText("drawer_app", app.packageName)
         val dragData = DragData(app, -1, false)
         val shadow = View.DragShadowBuilder(createDragShadow(app))
-        rootLayout.startDragAndDrop(clipData, shadow, dragData, View.DRAG_FLAG_GLOBAL)
+        appGridView.startDragAndDrop(clipData, shadow, dragData, View.DRAG_FLAG_GLOBAL)
+
 
 
         // Close drawer after successful drop

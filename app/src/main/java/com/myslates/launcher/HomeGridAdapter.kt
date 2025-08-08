@@ -62,7 +62,8 @@ class HomeGridAdapter(
 
     private fun setupDragListener(holder: ViewHolder, position: Int) {
         holder.itemView.setOnDragListener { _, event ->
-            val draggedApp = event.localState as? AppObject
+            val dragData = event.localState as? DragData
+            val draggedApp = dragData?.app
 
             when (event.action) {
                 DragEvent.ACTION_DRAG_STARTED -> true
@@ -85,7 +86,6 @@ class HomeGridAdapter(
                     if (draggedApp != null) {
                         val accepted = onEmptySlotDrop(position, draggedApp)
                         if (accepted) {
-                            apps[position] = draggedApp
                             notifyItemChanged(position)
                             return@setOnDragListener true
                         }
@@ -96,12 +96,21 @@ class HomeGridAdapter(
                 DragEvent.ACTION_DRAG_ENDED -> {
                     holder.emptySlot.setBackgroundColor(Color.TRANSPARENT)
                     holder.emptySlot.alpha = 0.3f
+
+                    if (!event.result && dragData?.isFromHomeScreen == true) {
+                        val originalPosition = dragData.originalPosition
+                        if (apps[originalPosition] == null) {
+                            apps[originalPosition] = dragData.app
+                            notifyItemChanged(originalPosition)
+                        }
+                    }
                     true
                 }
 
                 else -> false
             }
         }
+
     }
 
     private fun addTouchFeedback(view: View) {
