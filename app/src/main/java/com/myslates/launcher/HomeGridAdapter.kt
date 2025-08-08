@@ -1,13 +1,11 @@
 package com.myslates.launcher
 
-import android.content.ClipData
 import android.content.Context
 import android.graphics.Color
 import android.util.Log
 import android.view.*
 import android.widget.ImageView
 import android.widget.TextView
-import androidx.core.content.ContextCompat
 import androidx.recyclerview.widget.RecyclerView
 
 class HomeGridAdapter(
@@ -15,7 +13,8 @@ class HomeGridAdapter(
     private val apps: MutableList<AppObject?>,
     private val onAppClick: (AppObject) -> Unit,
     private val onAppLongClick: (AppObject, Int) -> Unit,
-    private val onEmptySlotDrop: (Int, AppObject) -> Boolean
+    private val onEmptySlotDrop: (Int, AppObject) -> Boolean,
+    private val onAppDrag: (AppObject, Int) -> Unit
 ) : RecyclerView.Adapter<HomeGridAdapter.ViewHolder>() {
 
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): ViewHolder {
@@ -28,49 +27,47 @@ class HomeGridAdapter(
     override fun onBindViewHolder(holder: ViewHolder, position: Int) {
         val app = apps[position]
 
+        holder.itemView.setOnClickListener(null)
+        holder.itemView.setOnLongClickListener(null)
+        holder.itemView.setOnTouchListener(null)
+
         if (app != null) {
-            // Show app
             holder.iconView.setImageDrawable(app.icon)
             holder.labelView.text = app.label
             holder.iconView.visibility = View.VISIBLE
             holder.labelView.visibility = View.VISIBLE
             holder.emptySlot.visibility = View.GONE
 
-            // Click listeners
-            holder.itemView.setOnClickListener { onAppClick(app) }
+            holder.itemView.setOnClickListener {
+                Log.d("HomeGridAdapter", "Clicked ${app.label} at $position")
+                onAppClick(app)
+            }
+
             holder.itemView.setOnLongClickListener {
+                Log.d("HomeGridAdapter", "Long press on ${app.label} at $position")
                 onAppLongClick(app, position)
+                onAppDrag(app, position)
                 true
             }
 
-            // Add modern touch feedback
             addTouchFeedback(holder.itemView)
-
         } else {
-            // Show empty slot
             holder.iconView.visibility = View.GONE
             holder.labelView.visibility = View.GONE
             holder.emptySlot.visibility = View.VISIBLE
-
-            holder.itemView.setOnClickListener(null)
-            holder.itemView.setOnLongClickListener(null)
         }
 
-        // Setup drag listener for all slots
         setupDragListener(holder, position)
     }
 
     private fun setupDragListener(holder: ViewHolder, position: Int) {
-        holder.itemView.setOnDragListener { view, event ->
+        holder.itemView.setOnDragListener { _, event ->
+            val draggedApp = event.localState as? AppObject
+
             when (event.action) {
-                DragEvent.ACTION_DRAG_STARTED -> {
-                    Log.d("HomeGridAdapter", "Drag started over position $position")
-                    true
-                }
+                DragEvent.ACTION_DRAG_STARTED -> true
 
                 DragEvent.ACTION_DRAG_ENTERED -> {
-                    Log.d("HomeGridAdapter", "Drag entered position $position")
-                    // Highlight the slot
                     if (apps[position] == null) {
                         holder.emptySlot.setBackgroundColor(Color.parseColor("#4CAF50"))
                         holder.emptySlot.alpha = 0.7f
@@ -79,38 +76,24 @@ class HomeGridAdapter(
                 }
 
                 DragEvent.ACTION_DRAG_EXITED -> {
-                    Log.d("HomeGridAdapter", "Drag exited position $position")
-                    // Remove highlight
                     holder.emptySlot.setBackgroundColor(Color.TRANSPARENT)
                     holder.emptySlot.alpha = 0.3f
                     true
                 }
 
                 DragEvent.ACTION_DROP -> {
-                    Log.d("HomeGridAdapter", "Drop at position $position")
-
-                    val clipData = event.clipData
-                    val data = clipData?.getItemAt(0)?.text?.toString()
-
-                    if (data != null) {
-                        val app = extractAppFromDragData(event, data)
-                        if (app != null) {
-                            val success = onEmptySlotDrop(position, app)
-                            Log.d("HomeGridAdapter", "Drop result: $success")
-
-                            // Remove highlight
-                            holder.emptySlot.setBackgroundColor(Color.TRANSPARENT)
-                            holder.emptySlot.alpha = 0.3f
-
-                            return@setOnDragListener success
+                    if (draggedApp != null) {
+                        val accepted = onEmptySlotDrop(position, draggedApp)
+                        if (accepted) {
+                            apps[position] = draggedApp
+                            notifyItemChanged(position)
+                            return@setOnDragListener true
                         }
                     }
                     false
                 }
 
                 DragEvent.ACTION_DRAG_ENDED -> {
-                    Log.d("HomeGridAdapter", "Drag ended over position $position")
-                    // Remove any highlights
                     holder.emptySlot.setBackgroundColor(Color.TRANSPARENT)
                     holder.emptySlot.alpha = 0.3f
                     true
@@ -118,16 +101,6 @@ class HomeGridAdapter(
 
                 else -> false
             }
-        }
-    }
-
-    private fun extractAppFromDragData(event: DragEvent, data: String): AppObject? {
-        return try {
-            val dragData = event.localState as? MainActivity.DragData
-            dragData?.app
-        } catch (e: Exception) {
-            Log.e("HomeGridAdapter", "Error extracting drag data", e)
-            null
         }
     }
 
@@ -142,6 +115,7 @@ class HomeGridAdapter(
                         .setDuration(100)
                         .start()
                 }
+
                 MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
                     v.animate()
                         .scaleX(1f)

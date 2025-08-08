@@ -4,9 +4,7 @@ import android.content.ClipData
 import android.content.Context
 import android.graphics.Color
 import android.util.Log
-import android.view.LayoutInflater
-import android.view.View
-import android.view.ViewGroup
+import android.view.*
 import android.widget.BaseAdapter
 import android.widget.ImageView
 import android.widget.TextView
@@ -20,7 +18,7 @@ class AppAdapter(
 
     override fun getCount(): Int = apps.size
 
-    override fun getItem(position: Int): AppObject = apps[position]  // 👈 cast to AppObject
+    override fun getItem(position: Int): AppObject = apps[position]
 
     override fun getItemId(position: Int): Long = position.toLong()
 
@@ -50,7 +48,7 @@ class AppAdapter(
         labelView.text = app.label
         labelView.setTextColor(Color.WHITE)
 
-        // Regular click to launch app
+        // Launch app on tap
         view.setOnClickListener {
             Log.d("AppAdapter", "Clicked on ${app.label}")
             try {
@@ -61,54 +59,32 @@ class AppAdapter(
             }
         }
 
-        // Long click for drag
+        // Start drag on long press
         view.setOnLongClickListener {
             Log.d("AppAdapter", "Long clicked on ${app.label}")
 
-            val clipData = ClipData.newPlainText("drawer_app", app.packageName)
-            val dragView = createDragShadow(app)
-            val shadow = View.DragShadowBuilder(dragView)
+            val clipData = ClipData.newPlainText("package", app.packageName)
+            val shadow = View.DragShadowBuilder(view)
 
             view.startDragAndDrop(
                 clipData,
                 shadow,
-                MainActivity.DragData(app, -1, false),
+                app, // localState is AppObject
                 View.DRAG_FLAG_GLOBAL
             )
 
-            // Trigger drag callback
-            onAppDrag(app)
             true
         }
 
-        // Add modern touch feedback
         addTouchFeedback(view)
 
         return view
     }
 
-    private fun createDragShadow(app: AppObject): View {
-        val dragView = LayoutInflater.from(context).inflate(R.layout.drag_shadow_item, null)
-        val iconView = dragView.findViewById<ImageView>(R.id.drag_icon)
-        val labelView = dragView.findViewById<TextView>(R.id.drag_label)
-
-        iconView.setImageDrawable(app.icon)
-        labelView.text = app.label
-
-        // Measure and layout
-        dragView.measure(
-            View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED),
-            View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED)
-        )
-        dragView.layout(0, 0, dragView.measuredWidth, dragView.measuredHeight)
-
-        return dragView
-    }
-
     private fun addTouchFeedback(view: View) {
         view.setOnTouchListener { v, event ->
             when (event.action) {
-                android.view.MotionEvent.ACTION_DOWN -> {
+                MotionEvent.ACTION_DOWN -> {
                     v.animate()
                         .scaleX(0.9f)
                         .scaleY(0.9f)
@@ -116,7 +92,7 @@ class AppAdapter(
                         .setDuration(100)
                         .start()
                 }
-                android.view.MotionEvent.ACTION_UP, android.view.MotionEvent.ACTION_CANCEL -> {
+                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
                     v.animate()
                         .scaleX(1f)
                         .scaleY(1f)
