@@ -227,6 +227,16 @@ class MainActivity : AppCompatActivity() {
                     Log.d("MainActivity", "Drag ended globally")
                     isDragging = false
                     hideDragFeedback()
+                    
+                    // If drag was not successful, restore the app to its original position
+                    if (!event.result) {
+                        val dragData = event.localState as? DragData
+                        if (dragData?.isFromHomeScreen == true && dragData.originalPosition >= 0) {
+                            homeScreenApps[dragData.originalPosition] = dragData.app
+                            homeGridAdapter.notifyItemChanged(dragData.originalPosition)
+                            Log.d("MainActivity", "Restored app to original position: ${dragData.originalPosition}")
+                        }
+                    }
                     true
                 }
 

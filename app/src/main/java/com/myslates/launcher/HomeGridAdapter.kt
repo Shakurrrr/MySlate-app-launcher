@@ -39,6 +39,7 @@ class HomeGridAdapter(
             // Click listeners
             holder.itemView.setOnClickListener { onAppClick(app) }
             holder.itemView.setOnLongClickListener {
+                Log.d("HomeGridAdapter", "Long click detected on ${app.label} at position $position")
                 onAppLongClick(app, position)
                 true
             }
