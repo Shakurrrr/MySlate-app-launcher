@@ -124,19 +124,22 @@ class MainActivity : AppCompatActivity() {
             val SWIPE_THRESHOLD_VELOCITY = 100
 
 
-            override fun onScroll(e1: MotionEvent?, e2: MotionEvent, distanceX: Float, distanceY: Float): Boolean {
+            override fun onFling(e1: MotionEvent?, e2: MotionEvent, velocityX: Float, velocityY: Float): Boolean {
                 if (e1 == null || e2 == null) return false
                 val deltaX = e2.x - e1.x
                 val deltaY = e2.y - e1.y
+                val absVelocityX = Math.abs(velocityX)
+                val absVelocityY = Math.abs(velocityY)
 
-                Log.d("GestureSwipe", "deltaY=$deltaY, deltaX=$deltaX, isDrawerOpen=$isDrawerOpen")
+                Log.d("GestureSwipe", "deltaY=$deltaY, deltaX=$deltaX, velocityY=$velocityY, velocityX=$velocityX, isDrawerOpen=$isDrawerOpen")
 
-                if (Math.abs(deltaY) > Math.abs(deltaX) && Math.abs(deltaY) > 50) {
-                    if (deltaY < 0 && !isDrawerOpen) {
+                // Vertical gestures (drawer)
+                if (absVelocityY > absVelocityX && absVelocityY > 500) {
+                    if (deltaY < -100 && !isDrawerOpen) {
                         Log.d("GestureSwipe", "Swipe up detected → Opening drawer")
                         slideUpDrawer()
                         return true
-                    } else if (deltaY > 0 && isDrawerOpen) {
+                    } else if (deltaY > 100 && isDrawerOpen) {
                         Log.d("GestureSwipe", "Swipe down detected → Closing drawer")
                         slideDownDrawer()
                         return true
@@ -145,11 +148,13 @@ class MainActivity : AppCompatActivity() {
 
 
                 // Horizontal gestures (side panels)
-                if (Math.abs(deltaX) > Math.abs(deltaY) && Math.abs(deltaX) > 50) {
-                    if (deltaX < 0) {
+                if (absVelocityX > absVelocityY && absVelocityX > 500) {
+                    if (deltaX < -100) {
+                        Log.d("GestureSwipe", "Swipe left detected → Showing right panel")
                         if (leftPanel.visibility == View.VISIBLE) hidePanels() else showRightPanel()
                         return true
-                    } else if (deltaX > 0) {
+                    } else if (deltaX > 100) {
+                        Log.d("GestureSwipe", "Swipe right detected → Showing left panel")
                         if (rightPanel.visibility == View.VISIBLE) hidePanels() else showLeftPanel()
                         return true
                     }
@@ -159,29 +164,29 @@ class MainActivity : AppCompatActivity() {
         })
 
         val touchListener = View.OnTouchListener { _, event ->
+            if (!isDragging && !isDrawerOpen) {
+                gestureDetector.onTouchEvent(event)
+            }
+            false
+        }
+
+        // Apply gesture detection to all main areas
+        homeContainer.setOnTouchListener(touchListener)
+
+
+        rootLayout.setOnTouchListener { _, event ->
             if (!isDragging) {
                 gestureDetector.onTouchEvent(event)
             }
             false
         }
 
-        rootLayout.setOnTouchListener(touchListener)
-        homeContainer.setOnTouchListener(touchListener)
-
-
-        // ready to remove
-        val forwardTouchListener = View.OnTouchListener { _, event ->
-            gestureDetector.onTouchEvent(event)
+        // Special handling for drawer
+        appDrawer.setOnTouchListener { _, event ->
+            if (isDrawerOpen) {
+                gestureDetector.onTouchEvent(event)
+            }
             false
-        }
-
-        listOf(
-            rootLayout,
-            homeContainer,
-            blurOverlay,
-            findViewById(R.id.home_grid_recycler)
-        ).forEach {
-            it.setOnTouchListener(forwardTouchListener)
         }
 
     }
