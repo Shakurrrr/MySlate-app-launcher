@@ -124,22 +124,24 @@ class MainActivity : AppCompatActivity() {
             val SWIPE_THRESHOLD_VELOCITY = 100
 
 
-            override fun onFling(e1: MotionEvent?, e2: MotionEvent, velocityX: Float, velocityY: Float): Boolean {
+            override fun onFling(e1: MotionEvent?, e2: MotionEvent?, velocityX: Float, velocityY: Float): Boolean {
                 if (e1 == null || e2 == null) return false
+                if (isDragging) return false // Don't process gestures during drag
+                
                 val deltaX = e2.x - e1.x
                 val deltaY = e2.y - e1.y
-                val absVelocityX = Math.abs(velocityX)
-                val absVelocityY = Math.abs(velocityY)
+                val absVelocityX = kotlin.math.abs(velocityX)
+                val absVelocityY = kotlin.math.abs(velocityY)
 
                 Log.d("GestureSwipe", "deltaY=$deltaY, deltaX=$deltaX, velocityY=$velocityY, velocityX=$velocityX, isDrawerOpen=$isDrawerOpen")
 
                 // Vertical gestures (drawer)
-                if (absVelocityY > absVelocityX && absVelocityY > 500) {
-                    if (deltaY < -100 && !isDrawerOpen) {
+                if (absVelocityY > absVelocityX && absVelocityY > 300) {
+                    if (deltaY < -150 && !isDrawerOpen) {
                         Log.d("GestureSwipe", "Swipe up detected → Opening drawer")
                         slideUpDrawer()
                         return true
-                    } else if (deltaY > 100 && isDrawerOpen) {
+                    } else if (deltaY > 150 && isDrawerOpen) {
                         Log.d("GestureSwipe", "Swipe down detected → Closing drawer")
                         slideDownDrawer()
                         return true
@@ -148,12 +150,12 @@ class MainActivity : AppCompatActivity() {
 
 
                 // Horizontal gestures (side panels)
-                if (absVelocityX > absVelocityY && absVelocityX > 500) {
-                    if (deltaX < -100) {
+                if (absVelocityX > absVelocityY && absVelocityX > 300 && !isDrawerOpen) {
+                    if (deltaX < -150) {
                         Log.d("GestureSwipe", "Swipe left detected → Showing right panel")
                         if (leftPanel.visibility == View.VISIBLE) hidePanels() else showRightPanel()
                         return true
-                    } else if (deltaX > 100) {
+                    } else if (deltaX > 150) {
                         Log.d("GestureSwipe", "Swipe right detected → Showing left panel")
                         if (rightPanel.visibility == View.VISIBLE) hidePanels() else showLeftPanel()
                         return true
@@ -163,8 +165,9 @@ class MainActivity : AppCompatActivity() {
             }
         })
 
-        val touchListener = View.OnTouchListener { _, event ->
-            if (!isDragging && !isDrawerOpen) {
+        // Apply gesture detection to root layout for global gestures
+        rootLayout.setOnTouchListener { _, event ->
+            if (!isDragging) {
                 gestureDetector.onTouchEvent(event)
             }
             false
@@ -484,18 +487,6 @@ class MainActivity : AppCompatActivity() {
                         .setInterpolator(AccelerateDecelerateInterpolator())
                         .start()
                 }
-                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
-                    v.animate()
-                        .scaleX(1f)
-                        .scaleY(1f)
-                        .alpha(1f)
-                        .setDuration(100)
-                        .setInterpolator(AccelerateDecelerateInterpolator())
-                        .start()
-                }
-            }
-            false
-        }
     }
 
     private fun launchApp(packageName: String) {
