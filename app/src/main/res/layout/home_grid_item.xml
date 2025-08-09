@@ -23,8 +23,8 @@
 
         <ImageView
             android:id="@+id/home_grid_icon"
-            android:layout_width="64dp"
-            android:layout_height="64dp"
+            android:layout_width="80dp"
+            android:layout_height="80dp"
             android:scaleType="centerCrop"
             android:background="@drawable/modern_icon_bg"
             android:clipToOutline="true"
@@ -37,7 +37,7 @@
             android:layout_height="wrap_content"
             android:layout_marginTop="8dp"
             android:textColor="@android:color/white"
-            android:textSize="12sp"
+            android:textSize="16sp"
             android:fontFamily="sans-serif-medium"
             android:gravity="center"
             android:maxLines="1"

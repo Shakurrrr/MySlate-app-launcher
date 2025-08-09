@@ -69,8 +69,8 @@
             android:id="@+id/home_grid_recycler"
             android:layout_width="match_parent"
             android:layout_height="match_parent"
-            android:layout_marginTop="200dp"
-            android:layout_marginBottom="200dp"
+            android:layout_marginTop="160dp"
+            android:layout_marginBottom="160dp"
             android:layout_marginStart="32dp"
             android:layout_marginEnd="32dp"
             android:clipToPadding="false"
@@ -143,7 +143,7 @@
         android:layout_marginStart="24dp"
         android:layout_marginEnd="24dp"
         android:elevation="8dp"
-        android:weightSum="4" />
+        android:weightSum="3" />
 
     <!-- Left Panel -->
     <ScrollView
@@ -222,7 +222,7 @@
         android:layout_height="match_parent"
         android:layout_gravity="bottom"
         android:orientation="vertical"
-        android:background="@drawable/modern_drawer_bg"
+        android:background="@drawable/ipad_mini_drawer"
         android:paddingTop="48dp"
         android:paddingBottom="24dp"
         android:paddingStart="24dp"
@@ -273,8 +273,8 @@
             android:layout_width="match_parent"
             android:layout_height="0dp"
             android:layout_weight="1"
-            android:numColumns="4"
-            android:horizontalSpacing="20dp"
+            android:numColumns="3"
+            android:horizontalSpacing="24dp"
             android:verticalSpacing="28dp"
             android:clipToPadding="false"
             android:paddingTop="16dp"

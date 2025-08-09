@@ -7,8 +7,8 @@
 
     <ImageView
         android:id="@+id/app_icon"
-        android:layout_width="64dp"
-        android:layout_height="64dp"
+        android:layout_width="100dp"
+        android:layout_height="100dp"
         android:scaleType="fitCenter"
         android:background="@drawable/icon_background"
         android:padding="8dp" />
@@ -19,7 +19,7 @@
         android:layout_height="wrap_content"
         android:paddingTop="8dp"
         android:textColor="#FFFFFF"
-        android:textSize="12sp"
+        android:textSize="16sp"
         android:ellipsize="end"
         android:maxLines="1"
         android:gravity="center" />

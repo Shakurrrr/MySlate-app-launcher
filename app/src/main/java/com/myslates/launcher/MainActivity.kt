@@ -13,6 +13,7 @@ import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.provider.Settings
+import android.text.TextUtils
 import android.util.Log
 import android.view.*
 import android.view.animation.AccelerateDecelerateInterpolator
@@ -53,13 +54,21 @@ class MainActivity : AppCompatActivity() {
     private var isDrawerOpen = false
     private var isDragging = false
     private var currentPage = 0
-    private val maxAppsPerPage = 20 // 4x5 grid
+    private val maxAppsPerPage = 20// 4x5 grid
     private val homeScreenApps = mutableListOf<AppObject?>()
 
+    private val isTablet get() = resources.configuration.smallestScreenWidthDp >= 600
+    private val HOME_ICON_DP   get() = if (isTablet) 112 else 72
+    private val DRAWER_ICON_DP get() = if (isTablet) 104 else 64
+    private val DOCK_ICON_DP   get() = if (isTablet) 96  else 56
+    private val LABEL_SP       get() = if (isTablet) 16f else 12f
+
+    private fun dp(dp: Int) = (dp * resources.displayMetrics.density).toInt()
+
+
     private val allowedApps = listOf(
-        "com.ATS.MySlates.Parent",
+        "com.android.settings",
         "com.ATS.MySlates",
-        "com.ATS.MySlates.Teacher",
         "com.adobe.reader"
     )
 
@@ -315,21 +324,25 @@ class MainActivity : AppCompatActivity() {
 
 
     private fun handleAppDrop(position: Int, app: AppObject): Boolean {
-        Log.d("MainActivity", "Dropping app ${app.label} to position $position")
-
         if (position !in homeScreenApps.indices) return false
 
-        // Find free slot if occupied
-        var targetPosition = position
-        if (homeScreenApps[targetPosition] != null) {
-            targetPosition = findNextEmptySlot(position)
-            if (targetPosition == -1) return false
+        if (homeScreenApps[position] == null) {
+            homeScreenApps[position] = app
+            homeGridAdapter.notifyItemChanged(position)
+            return true
         }
 
-        homeScreenApps[targetPosition] = app
-        homeGridAdapter.notifyItemChanged(targetPosition)
-        return true
+        val next = findNextEmptySlot(position)
+        if (next != -1) {
+            homeScreenApps[next] = app
+            homeGridAdapter.notifyItemChanged(next)
+            return true
+        }
+
+        Toast.makeText(this, "No empty slot available", Toast.LENGTH_SHORT).show()
+        return false
     }
+
 
 
 
@@ -422,9 +435,8 @@ class MainActivity : AppCompatActivity() {
         bottomBar.removeAllViews()
 
         val bottomApps = listOf(
-            "com.ATS.MySlates.Parent",
+            "com.android.settings",
             "com.ATS.MySlates",
-            "com.ATS.MySlates.Teacher",
             "com.adobe.reader"
         )
 
@@ -454,7 +466,7 @@ class MainActivity : AppCompatActivity() {
 
         val iconView = ImageView(this).apply {
             setImageDrawable(icon)
-            layoutParams = LinearLayout.LayoutParams(dpToPx(56), dpToPx(56))
+            layoutParams = LinearLayout.LayoutParams(dpToPx(100), dpToPx(100))
             scaleType = ImageView.ScaleType.CENTER_CROP
             background = ContextCompat.getDrawable(this@MainActivity, R.drawable.modern_icon_bg)
             clipToOutline = true
@@ -463,10 +475,14 @@ class MainActivity : AppCompatActivity() {
 
         val labelView = TextView(this).apply {
             text = label
-            textSize = 12f
+            textSize = 16f
             gravity = Gravity.CENTER
             setTextColor(Color.WHITE)
             alpha = 0.9f
+            setPadding(0, dp(8), 0, 0)
+            maxLines = 1
+            ellipsize = TextUtils.TruncateAt.END
+
         }
 
         appView.addView(iconView)
