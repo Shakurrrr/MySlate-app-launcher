@@ -37,6 +37,16 @@ class HomeGridAdapter(
             holder.iconView.visibility = View.VISIBLE
             holder.labelView.visibility = View.VISIBLE
             holder.emptySlot.visibility = View.GONE
+            
+            // Apply tablet scaling
+            val iconSize = if (context.resources.configuration.smallestScreenWidthDp >= 600) 100 else 80
+            val layoutParams = holder.iconView.layoutParams
+            layoutParams.width = (iconSize * context.resources.displayMetrics.density).toInt()
+            layoutParams.height = (iconSize * context.resources.displayMetrics.density).toInt()
+            holder.iconView.layoutParams = layoutParams
+            
+            val textSize = if (context.resources.configuration.smallestScreenWidthDp >= 600) 18f else 16f
+            holder.labelView.textSize = textSize
 
             // Apply tablet scaling
             val iconSize = if (context.resources.configuration.smallestScreenWidthDp >= 600) 100 else 80
