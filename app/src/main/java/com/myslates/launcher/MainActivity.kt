@@ -4,7 +4,9 @@ import android.animation.Animator
 import android.animation.AnimatorListenerAdapter
 import android.animation.ObjectAnimator
 import android.animation.ValueAnimator
+import android.app.admin.DevicePolicyManager
 import android.content.ClipData
+import android.content.ComponentName
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Color
@@ -15,12 +17,14 @@ import android.location.LocationManager
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.os.UserManager
 import android.provider.Settings
 import android.text.TextUtils
 import android.util.Log
 import android.view.*
 import android.view.animation.AccelerateDecelerateInterpolator
 import android.widget.*
+import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
 import androidx.recyclerview.widget.GridLayoutManager
@@ -62,14 +66,21 @@ class MainActivity : AppCompatActivity() {
     private var isDragging = false
     private var isPanelOpen = false
     private var currentPage = 0
-    private val maxAppsPerPage = 20// 4x5 grid
+    private val maxAppsPerPage = 15 // 3x5 grid
     private val homeScreenApps = mutableListOf<AppObject?>()
 
+    // Security components
+    private lateinit var devicePolicyManager: DevicePolicyManager
+    private lateinit var adminComponent: ComponentName
+    private val PARENTAL_PIN = "123456" // In production, store securely
+    
     private val isTablet get() = resources.configuration.smallestScreenWidthDp >= 600
-    private val HOME_ICON_DP   get() = if (isTablet) 112 else 72
-    private val DRAWER_ICON_DP get() = if (isTablet) 104 else 64
-    private val DOCK_ICON_DP   get() = if (isTablet) 96  else 56
-    private val LABEL_SP       get() = if (isTablet) 16f else 12f
+    private val HOME_ICON_DP   get() = if (isTablet) 120 else 80
+    private val DRAWER_ICON_DP get() = if (isTablet) 110 else 70
+    private val DOCK_ICON_DP   get() = if (isTablet) 100 else 60
+    private val LABEL_SP       get() = if (isTablet) 18f else 14f
+    private val TIME_SP        get() = if (isTablet) 96f else 72f
+    private val DATE_SP        get() = if (isTablet) 28f else 20f
 
     private fun dp(dp: Int) = (dp * resources.displayMetrics.density).toInt()
 
@@ -96,6 +107,7 @@ class MainActivity : AppCompatActivity() {
         setTheme(R.style.Theme_MySlates_Dark)
         setContentView(R.layout.activity_main)
 
+        initializeSecurity()
         initializeViews()
         setupDragAndDrop()
         setupHomeGrid()
@@ -106,6 +118,94 @@ class MainActivity : AppCompatActivity() {
         // Initialize with empty grid
         repeat(maxAppsPerPage) { homeScreenApps.add(null) }
         homeGridAdapter.notifyDataSetChanged()
+        
+        // Apply tablet scaling
+        applyTabletScaling()
+        
+        // Enable kiosk mode
+        enableKioskMode()
+    }
+    
+    private fun initializeSecurity() {
+        devicePolicyManager = getSystemService(DEVICE_POLICY_SERVICE) as DevicePolicyManager
+        adminComponent = ComponentName(this, LauncherDeviceAdminReceiver::class.java)
+        
+        // Request device admin if not already granted
+        if (!devicePolicyManager.isAdminActive(adminComponent)) {
+            val intent = Intent(DevicePolicyManager.ACTION_ADD_DEVICE_ADMIN)
+            intent.putExtra(DevicePolicyManager.EXTRA_DEVICE_ADMIN, adminComponent)
+            intent.putExtra(DevicePolicyManager.EXTRA_ADD_EXPLANATION, 
+                "Enable device admin to secure the launcher")
+            startActivity(intent)
+        }
+        
+        // Apply user restrictions
+        applyUserRestrictions()
+    }
+    
+    private fun applyUserRestrictions() {
+        if (devicePolicyManager.isAdminActive(adminComponent)) {
+            try {
+                // Disable factory reset
+                devicePolicyManager.addUserRestriction(adminComponent, UserManager.DISALLOW_FACTORY_RESET)
+                
+                // Disable adding accounts
+                devicePolicyManager.addUserRestriction(adminComponent, UserManager.DISALLOW_MODIFY_ACCOUNTS)
+                
+                // Disable installing apps
+                devicePolicyManager.addUserRestriction(adminComponent, UserManager.DISALLOW_INSTALL_APPS)
+                
+                // Disable uninstalling apps
+                devicePolicyManager.addUserRestriction(adminComponent, UserManager.DISALLOW_UNINSTALL_APPS)
+                
+                // Disable USB file transfer
+                devicePolicyManager.addUserRestriction(adminComponent, UserManager.DISALLOW_USB_FILE_TRANSFER)
+                
+                Log.d("Security", "User restrictions applied successfully")
+            } catch (e: Exception) {
+                Log.e("Security", "Failed to apply user restrictions", e)
+            }
+        }
+    }
+    
+    private fun enableKioskMode() {
+        try {
+            if (devicePolicyManager.isAdminActive(adminComponent)) {
+                // Set as device owner if possible
+                if (devicePolicyManager.isDeviceOwnerApp(packageName)) {
+                    // Enable lock task mode
+                    devicePolicyManager.setLockTaskPackages(adminComponent, arrayOf(packageName))
+                    startLockTask()
+                    Log.d("Security", "Kiosk mode enabled")
+                }
+            }
+        } catch (e: Exception) {
+            Log.e("Security", "Failed to enable kiosk mode", e)
+        }
+    }
+    
+    private fun applyTabletScaling() {
+        // Scale time text
+        timeText.textSize = TIME_SP
+        
+        // Scale date and weather text
+        dateText.textSize = DATE_SP
+        weatherText.textSize = DATE_SP
+        
+        // Adjust margins for tablets
+        val topInfoBar = findViewById<LinearLayout>(R.id.top_info_bar)
+        val params = topInfoBar.layoutParams as FrameLayout.LayoutParams
+        params.topMargin = if (isTablet) dp(80) else dp(64)
+        params.marginStart = if (isTablet) dp(48) else dp(32)
+        topInfoBar.layoutParams = params
+        
+        // Adjust grid margins
+        val gridParams = homeGridRecyclerView.layoutParams as FrameLayout.LayoutParams
+        gridParams.topMargin = if (isTablet) dp(200) else dp(160)
+        gridParams.bottomMargin = if (isTablet) dp(200) else dp(160)
+        gridParams.marginStart = if (isTablet) dp(48) else dp(32)
+        gridParams.marginEnd = if (isTablet) dp(48) else dp(32)
+        homeGridRecyclerView.layoutParams = gridParams
     }
 
     private fun initializeViews() {
@@ -224,11 +324,11 @@ class MainActivity : AppCompatActivity() {
             apps = homeScreenApps,
             onAppClick = { app -> launchApp(app.packageName) },
             onAppLongClick = { app, position -> startHomeAppDrag(app, position) },
-            onEmptySlotDrop = { position, app -> handleAppDrop(position, app) },
+            onEmptySlotDrop = { position, app -> handleAppDropWithDuplicateCheck(position, app) },
             onAppDrag = { app, position -> startHomeAppDrag(app, position) }
         )
 
-        homeGridRecyclerView.layoutManager = GridLayoutManager(this, 4)
+        homeGridRecyclerView.layoutManager = GridLayoutManager(this, 3) // Changed to 3 columns
         homeGridRecyclerView.adapter = homeGridAdapter
         homeGridRecyclerView.itemAnimator = null // Disable animations for smoother drag
     }
@@ -267,15 +367,19 @@ class MainActivity : AppCompatActivity() {
                 DragEvent.ACTION_DROP -> {
                     Log.d("MainActivity", "Drop on root layout")
                     if (dragData != null && !dragData.isFromHomeScreen) {
-                        // Find first empty slot for drawer apps
-                        val emptySlot = findNextEmptySlot(0)
-                        if (emptySlot != -1) {
-                            homeScreenApps[emptySlot] = dragData.app
-                            homeGridAdapter.notifyItemChanged(emptySlot)
-                            Toast.makeText(this, "${dragData.app.label} added to home screen", Toast.LENGTH_SHORT).show()
-                            return@setOnDragListener true
+                        // Check for duplicates before dropping
+                        if (!isAppAlreadyOnHomeScreen(dragData.app)) {
+                            val emptySlot = findNextEmptySlot(0)
+                            if (emptySlot != -1) {
+                                homeScreenApps[emptySlot] = dragData.app
+                                homeGridAdapter.notifyItemChanged(emptySlot)
+                                Toast.makeText(this, "${dragData.app.label} added to home screen", Toast.LENGTH_SHORT).show()
+                                return@setOnDragListener true
+                            } else {
+                                Toast.makeText(this, "Home screen is full", Toast.LENGTH_SHORT).show()
+                            }
                         } else {
-                            Toast.makeText(this, "Home screen is full", Toast.LENGTH_SHORT).show()
+                            Toast.makeText(this, "${dragData.app.label} is already on home screen", Toast.LENGTH_SHORT).show()
                         }
                     }
                     false
@@ -392,10 +496,13 @@ class MainActivity : AppCompatActivity() {
         homeGridAdapter.notifyItemChanged(position)
     }
 
-
-    private fun handleAppDrop(position: Int, app: AppObject): Boolean {
+    private fun handleAppDropWithDuplicateCheck(position: Int, app: AppObject): Boolean {
         if (position !in homeScreenApps.indices) return false
-
+        
+        // Check for duplicates
+        if (isAppAlreadyOnHomeScreen(app)) {
+            Toast.makeText(this, "${app.label} is already on home screen", Toast.LENGTH_SHORT).show()
+            return false
         if (homeScreenApps[position] == null) {
             homeScreenApps[position] = app
             homeGridAdapter.notifyItemChanged(position)
@@ -412,6 +519,13 @@ class MainActivity : AppCompatActivity() {
         Toast.makeText(this, "No empty slot available", Toast.LENGTH_SHORT).show()
         return false
     }
+
+    private fun isAppAlreadyOnHomeScreen(app: AppObject): Boolean {
+        return homeScreenApps.any { existingApp ->
+            existingApp?.packageName == app.packageName
+        }
+    }
+
 
 
 
@@ -501,7 +615,7 @@ class MainActivity : AppCompatActivity() {
                 val appLabel = pm.getApplicationLabel(appInfo).toString()
                 val appIcon = pm.getApplicationIcon(packageName)
 
-                val appView = createBottomBarAppView(appLabel, appIcon, packageName)
+                val appView = createBottomBarAppView(appLabel, appIcon, packageName, false)
                 bottomBar.addView(appView)
             } catch (e: Exception) {
                 Log.e("MainActivity", "Bottom bar app not found: $packageName")
@@ -509,7 +623,7 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun createBottomBarAppView(label: String, icon: android.graphics.drawable.Drawable, packageName: String): View {
+    private fun createBottomBarAppView(label: String, icon: android.graphics.drawable.Drawable, packageName: String, allowCopy: Boolean = false): View {
         val appView = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER
@@ -520,7 +634,7 @@ class MainActivity : AppCompatActivity() {
 
         val iconView = ImageView(this).apply {
             setImageDrawable(icon)
-            layoutParams = LinearLayout.LayoutParams(dpToPx(100), dpToPx(100))
+            layoutParams = LinearLayout.LayoutParams(dpToPx(DOCK_ICON_DP), dpToPx(DOCK_ICON_DP))
             scaleType = ImageView.ScaleType.CENTER_CROP
             background = ContextCompat.getDrawable(this@MainActivity, R.drawable.modern_icon_bg)
             clipToOutline = true
@@ -529,7 +643,7 @@ class MainActivity : AppCompatActivity() {
 
         val labelView = TextView(this).apply {
             text = label
-            textSize = 16f
+            textSize = LABEL_SP
             gravity = Gravity.CENTER
             setTextColor(Color.WHITE)
             alpha = 0.9f
@@ -543,15 +657,42 @@ class MainActivity : AppCompatActivity() {
         appView.addView(labelView)
 
         // Click listener
-        appView.setOnClickListener { launchApp(packageName) }
+        appView.setOnClickListener { 
+            if (packageName == "com.android.settings") {
+                showPinDialog { launchApp(packageName) }
+            } else {
+                launchApp(packageName)
+            }
+        }
 
         // Long click for drag
         appView.setOnLongClickListener {
             val app = AppObject(label, icon, packageName)
-            val clipData = ClipData.newPlainText("bottom_app", packageName)
-            val dragData = DragData(app, -1, false)
-            val shadow = View.DragShadowBuilder(createDragShadow(app))
-            appView.startDragAndDrop(clipData, shadow, dragData, View.DRAG_FLAG_GLOBAL)
+            
+            if (allowCopy) {
+                // Allow copying to home screen
+                val clipData = ClipData.newPlainText("bottom_app", packageName)
+                val dragData = DragData(app, -1, false)
+                val shadow = View.DragShadowBuilder(createDragShadow(app))
+                appView.startDragAndDrop(clipData, shadow, dragData, View.DRAG_FLAG_GLOBAL)
+            } else {
+                // Move from bottom bar to home screen
+                if (!isAppAlreadyOnHomeScreen(app)) {
+                    val emptySlot = findNextEmptySlot(0)
+                    if (emptySlot != -1) {
+                        homeScreenApps[emptySlot] = app
+                        homeGridAdapter.notifyItemChanged(emptySlot)
+                        
+                        // Remove from bottom bar
+                        bottomBar.removeView(appView)
+                        Toast.makeText(this, "${app.label} moved to home screen", Toast.LENGTH_SHORT).show()
+                    } else {
+                        Toast.makeText(this, "Home screen is full", Toast.LENGTH_SHORT).show()
+                    }
+                } else {
+                    Toast.makeText(this, "${app.label} is already on home screen", Toast.LENGTH_SHORT).show()
+                }
+            }
             true
         }
 
@@ -561,6 +702,31 @@ class MainActivity : AppCompatActivity() {
         return appView
     }
 
+    private fun showPinDialog(onSuccess: () -> Unit) {
+        val dialogView = LayoutInflater.from(this).inflate(android.R.layout.simple_list_item_1, null)
+        val editText = EditText(this).apply {
+            inputType = android.text.InputType.TYPE_CLASS_NUMBER or android.text.InputType.TYPE_NUMBER_VARIATION_PASSWORD
+            hint = "Enter 6-digit PIN"
+            maxLines = 1
+            setPadding(dp(16), dp(16), dp(16), dp(16))
+        }
+        
+        AlertDialog.Builder(this)
+            .setTitle("Parental Control")
+            .setMessage("Enter PIN to access Settings")
+            .setView(editText)
+            .setPositiveButton("OK") { _, _ ->
+                val enteredPin = editText.text.toString()
+                if (enteredPin == PARENTAL_PIN) {
+                    onSuccess()
+                } else {
+                    Toast.makeText(this, "Incorrect PIN", Toast.LENGTH_SHORT).show()
+                }
+            }
+            .setNegativeButton("Cancel", null)
+            .setCancelable(false)
+            .show()
+    }
     private fun addModernTouchFeedback(view: View) {
         view.setOnTouchListener { v, event ->
             when (event.action) {
@@ -588,6 +754,17 @@ class MainActivity : AppCompatActivity() {
 
     private fun launchApp(packageName: String) {
         try {
+            // Intercept Settings app
+            if (packageName == "com.android.settings") {
+                showPinDialog {
+                    val intent = packageManager.getLaunchIntentForPackage(packageName)
+                    if (intent != null) {
+                        startActivity(intent)
+                    }
+                }
+                return
+            }
+            
             val intent = packageManager.getLaunchIntentForPackage(packageName)
             if (intent != null) {
                 startActivity(intent)
@@ -954,8 +1131,11 @@ class MainActivity : AppCompatActivity() {
             isDrawerOpen -> slideDownDrawer()
             isPanelOpen -> hidePanels()
             else -> {
-                // Don't allow back button to exit launcher
-                // super.onBackPressed()
+                // Don't allow back button to exit launcher in kiosk mode
+                if (!devicePolicyManager.isLockTaskPermitted(packageName)) {
+                    // Only allow exit if not in kiosk mode
+                    super.onBackPressed()
+                }
             }
         }
     }
@@ -964,6 +1144,18 @@ class MainActivity : AppCompatActivity() {
         super.onDestroy()
         handler.removeCallbacksAndMessages(null)
         executor.shutdown()
+    }
+    
+    override fun onStop() {
+        super.onStop()
+        // Prevent switching to other launchers
+        if (devicePolicyManager.isLockTaskPermitted(packageName)) {
+            val homeIntent = Intent(Intent.ACTION_MAIN).apply {
+                addCategory(Intent.CATEGORY_HOME)
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK
+            }
+            startActivity(homeIntent)
+        }
     }
 
 }
