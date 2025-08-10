@@ -48,7 +48,6 @@ class MainActivity : AppCompatActivity() {
     private lateinit var bottomBar: LinearLayout
     private lateinit var removeAppZone: View
     private lateinit var pageIndicator: LinearLayout
-    private lateinit var viewPager: androidx.viewpager2.widget.ViewPager2
 
     private val handler = Handler(Looper.getMainLooper())
     private var isDrawerOpen = false
@@ -122,9 +121,6 @@ class MainActivity : AppCompatActivity() {
 
         homeContainer.isClickable = true
         homeContainer.isFocusable = true
-        homeContainer.setOnTouchListener { _, event ->
-            gestureDetector.onTouchEvent(event)
-        }
 
         // Initial setup
         appDrawer.post { appDrawer.translationY = appDrawer.height.toFloat() }
@@ -136,35 +132,69 @@ class MainActivity : AppCompatActivity() {
 
     private fun setupSwipeGestures() {
         gestureDetector = GestureDetector(this, object : GestureDetector.SimpleOnGestureListener() {
+            override fun onDown(e: MotionEvent): Boolean {
+                return true
+            }
+
             override fun onScroll(e1: MotionEvent?, e2: MotionEvent, dx: Float, dy: Float): Boolean {
                 if (e1 == null || e2 == null) return false
+                if (isDragging) return false // Don't handle gestures during drag
+
                 val deltaX = e2.x - e1.x
                 val deltaY = e2.y - e1.y
 
                 return when {
                     Math.abs(deltaY) > Math.abs(deltaX) -> {
-                        if (deltaY > 150 && isDrawerOpen) {
+                        if (deltaY > 100 && isDrawerOpen) {
                             slideDownDrawer(); true
-                        } else if (deltaY < -150 && !isDrawerOpen) {
+                        } else if (deltaY < -100 && !isDrawerOpen) {
                             slideUpDrawer(); true
                         } else false
                     }
 
-                    deltaX < -150 -> { showRightPanel(); true }
-                    deltaX > 150 -> { showLeftPanel(); true }
+                    deltaX < -100 -> { showRightPanel(); true }
+                    deltaX > 100 -> { showLeftPanel(); true }
+                    else -> false
+                }
+            }
+
+            override fun onFling(e1: MotionEvent?, e2: MotionEvent, velocityX: Float, velocityY: Float): Boolean {
+                if (e1 == null || e2 == null) return false
+                if (isDragging) return false
+
+                val deltaX = e2.x - e1.x
+                val deltaY = e2.y - e1.y
+
+                return when {
+                    Math.abs(deltaY) > Math.abs(deltaX) && Math.abs(velocityY) > 1000 -> {
+                        if (deltaY > 0 && isDrawerOpen) {
+                            slideDownDrawer(); true
+                        } else if (deltaY < 0 && !isDrawerOpen) {
+                            slideUpDrawer(); true
+                        } else false
+                    }
+                    Math.abs(deltaX) > Math.abs(deltaY) && Math.abs(velocityX) > 1000 -> {
+                        if (deltaX < 0) {
+                            showRightPanel(); true
+                        } else if (deltaX > 0) {
+                            showLeftPanel(); true
+                        } else false
+                    }
                     else -> false
                 }
             }
         })
 
-        val listener = View.OnTouchListener { _, event ->
-            gestureDetector.onTouchEvent(event)
-            true
+        // Apply gesture detection to the entire root layout
+        val gestureListener = View.OnTouchListener { _, event ->
+            if (!isDragging) {
+                gestureDetector.onTouchEvent(event)
+            }
+            false // Allow other touch events to be processed
         }
 
-        listOf(rootLayout, homeContainer, appDrawer, appGridView).forEach {
-            it.setOnTouchListener(listener)
-        }
+        rootLayout.setOnTouchListener(gestureListener)
+        homeContainer.setOnTouchListener(gestureListener)
     }
 
     private fun setupHomeGrid() {
@@ -185,13 +215,17 @@ class MainActivity : AppCompatActivity() {
     private fun setupDragAndDrop() {
         // Global drag listener for the entire root layout
         rootLayout.setOnDragListener { _, event ->
+            val dragData = event.localState as? DragData
+
             when (event.action) {
                 DragEvent.ACTION_DRAG_STARTED -> {
                     Log.d("MainActivity", "Drag started globally")
                     isDragging = true
                     showDragFeedback()
 
-                    if (isDrawerOpen) slideDownDrawerForDrop()
+                    if (isDrawerOpen && dragData?.isFromHomeScreen != true) {
+                        slideDownDrawerForDrop()
+                    }
                     Log.d("MainActivity", "DRAG STARTED - type=${event.clipDescription?.label}")
                     true
                 }
@@ -201,7 +235,6 @@ class MainActivity : AppCompatActivity() {
                     isDragging = false
                     hideDragFeedback()
 
-                    val dragData = event.localState as? DragData
                     if (!event.result && dragData?.isFromHomeScreen == true && dragData.originalPosition >= 0) {
                         homeScreenApps[dragData.originalPosition] = dragData.app
                         homeGridAdapter.notifyItemChanged(dragData.originalPosition)
@@ -211,7 +244,19 @@ class MainActivity : AppCompatActivity() {
                 }
 
                 DragEvent.ACTION_DROP -> {
-                    Log.d("MainActivity", "Unhandled drop on root layout")
+                    Log.d("MainActivity", "Drop on root layout")
+                    if (dragData != null && !dragData.isFromHomeScreen) {
+                        // Find first empty slot for drawer apps
+                        val emptySlot = findNextEmptySlot(0)
+                        if (emptySlot != -1) {
+                            homeScreenApps[emptySlot] = dragData.app
+                            homeGridAdapter.notifyItemChanged(emptySlot)
+                            Toast.makeText(this, "${dragData.app.label} added to home screen", Toast.LENGTH_SHORT).show()
+                            return@setOnDragListener true
+                        } else {
+                            Toast.makeText(this, "Home screen is full", Toast.LENGTH_SHORT).show()
+                        }
+                    }
                     false
                 }
 
@@ -222,51 +267,55 @@ class MainActivity : AppCompatActivity() {
         // Dedicated drop handler for REMOVE zone
         removeAppZone.setOnDragListener { _, event ->
             val dragData = event.localState as? DragData
-            if (dragData?.isFromHomeScreen == true && dragData.originalPosition >= 0) {
-                homeScreenApps[dragData.originalPosition] = null
-                homeGridAdapter.notifyItemChanged(dragData.originalPosition)
-            }
-
 
             when (event.action) {
+                DragEvent.ACTION_DRAG_STARTED -> {
+                    // Only accept drops from home screen
+                    dragData?.isFromHomeScreen == true
+                }
+
                 DragEvent.ACTION_DRAG_ENTERED -> {
-                    removeAppZone.setBackgroundColor(Color.RED)
-                    removeAppZone.alpha = 1f
+                    if (dragData?.isFromHomeScreen == true) {
+                        removeAppZone.setBackgroundColor(Color.parseColor("#FF5722"))
+                        removeAppZone.alpha = 1f
+                        removeAppZone.animate().scaleX(1.1f).scaleY(1.1f).setDuration(150).start()
+                    }
                     true
                 }
 
                 DragEvent.ACTION_DRAG_EXITED -> {
                     removeAppZone.setBackgroundColor(Color.TRANSPARENT)
                     removeAppZone.alpha = 0.7f
+                    removeAppZone.animate().scaleX(1f).scaleY(1f).setDuration(150).start()
                     true
                 }
 
                 DragEvent.ACTION_DROP -> {
-                    if (dragData != null && dragData.isFromHomeScreen) {
+                    if (dragData?.isFromHomeScreen == true) {
                         val pos = dragData.originalPosition
                         if (pos in homeScreenApps.indices) {
                             homeScreenApps[pos] = null
                             homeGridAdapter.notifyItemChanged(pos)
                             Toast.makeText(this, "${dragData.app.label} removed", Toast.LENGTH_SHORT).show()
+                            Log.d("MainActivity", "App removed from position $pos")
                         }
+                        true
+                    } else {
+                        false
                     }
-                    true
                 }
 
                 DragEvent.ACTION_DRAG_ENDED -> {
                     removeAppZone.setBackgroundColor(Color.TRANSPARENT)
                     removeAppZone.alpha = 0.7f
+                    removeAppZone.animate().scaleX(1f).scaleY(1f).setDuration(150).start()
                     true
                 }
 
                 else -> false
             }
         }
-
     }
-
-
-
 
     private fun showDragFeedback() {
         // Show blur overlay
@@ -300,7 +349,7 @@ class MainActivity : AppCompatActivity() {
     private fun slideDownDrawerForDrop() {
         appDrawer.animate()
             .translationY(appDrawer.height.toFloat())
-            .setDuration(300)
+            .setDuration(200)
             .setInterpolator(AccelerateDecelerateInterpolator())
             .start()
         isDrawerOpen = false
@@ -409,26 +458,10 @@ class MainActivity : AppCompatActivity() {
     private fun handleDrawerAppDrag(app: AppObject) {
         Log.d("MainActivity", "Handling drawer app drag: ${app.label}")
 
-        // Find empty slot
-        val emptySlot = findNextEmptySlot(0)
-        if (emptySlot == -1) {
-            Toast.makeText(this, "Home screen is full", Toast.LENGTH_SHORT).show()
-            return
-        }
-
         val clipData = ClipData.newPlainText("drawer_app", app.packageName)
         val dragData = DragData(app, -1, false)
         val shadow = View.DragShadowBuilder(createDragShadow(app))
         appGridView.startDragAndDrop(clipData, shadow, dragData, View.DRAG_FLAG_GLOBAL)
-
-
-
-        // Close drawer after successful drop
-        handler.postDelayed({
-            if (isDrawerOpen) {
-                slideDownDrawer()
-            }
-        }, 300)
     }
 
     private fun loadBottomBarApps() {
@@ -494,9 +527,10 @@ class MainActivity : AppCompatActivity() {
         // Long click for drag
         appView.setOnLongClickListener {
             val app = AppObject(label, icon, packageName)
-            val clipData = ClipData.newPlainText("drawer_app", packageName)
+            val clipData = ClipData.newPlainText("bottom_app", packageName)
+            val dragData = DragData(app, -1, false)
             val shadow = View.DragShadowBuilder(createDragShadow(app))
-            appView.startDragAndDrop(clipData, shadow, DragData(app, -1, false), View.DRAG_FLAG_GLOBAL)
+            appView.startDragAndDrop(clipData, shadow, dragData, View.DRAG_FLAG_GLOBAL)
             true
         }
 
@@ -600,7 +634,7 @@ class MainActivity : AppCompatActivity() {
         if (leftPanel.visibility == View.VISIBLE) {
             leftPanel.animate()
                 .translationX(-leftPanel.width.toFloat())
-                .setDuration(300)
+                .setDuration(250)
                 .setInterpolator(AccelerateDecelerateInterpolator())
                 .withEndAction { leftPanel.visibility = View.GONE }
                 .start()
@@ -608,7 +642,7 @@ class MainActivity : AppCompatActivity() {
         if (rightPanel.visibility == View.VISIBLE) {
             rightPanel.animate()
                 .translationX(rightPanel.width.toFloat())
-                .setDuration(300)
+                .setDuration(250)
                 .setInterpolator(AccelerateDecelerateInterpolator())
                 .withEndAction { rightPanel.visibility = View.GONE }
                 .start()
@@ -637,7 +671,10 @@ class MainActivity : AppCompatActivity() {
         when {
             isDrawerOpen -> slideDownDrawer()
             leftPanel.visibility == View.VISIBLE || rightPanel.visibility == View.VISIBLE -> hidePanels()
-            else -> super.onBackPressed()
+            else -> {
+                // Don't allow back button to exit launcher
+                // super.onBackPressed()
+            }
         }
     }
 
