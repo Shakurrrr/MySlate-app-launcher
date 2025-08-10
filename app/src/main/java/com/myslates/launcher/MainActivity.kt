@@ -64,7 +64,7 @@ class MainActivity : AppCompatActivity() {
     private val PARENTAL_PIN = "123456" // TODO: store securely
 
     private val isTablet get() = resources.configuration.smallestScreenWidthDp >= 600
-    private val HOME_ICON_DP   get() = if (isTablet) 120 else 90
+    private val HOME_ICON_DP   get() = if (isTablet) 140 else 90
     private val DRAWER_ICON_DP get() = if (isTablet) 140 else 90
     private val DOCK_ICON_DP get() = if (isTablet) 140 else 90
     private val LABEL_SP       get() = if (isTablet) 18f else 14f
