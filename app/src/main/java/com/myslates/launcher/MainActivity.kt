@@ -389,6 +389,69 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
+        // Setup bottom bar as drop target
+        bottomBar.setOnDragListener { _, event ->
+            val dragData = event.localState as? DragData
+            
+            when (event.action) {
+                DragEvent.ACTION_DRAG_STARTED -> {
+                    Log.d("MainActivity", "Drag started over bottom bar")
+                    true
+                }
+                
+                DragEvent.ACTION_DRAG_ENTERED -> {
+                    bottomBar.animate().alpha(0.7f).setDuration(150).start()
+                    Log.d("MainActivity", "Drag entered bottom bar")
+                    true
+                }
+                
+                DragEvent.ACTION_DRAG_EXITED -> {
+                    bottomBar.animate().alpha(1f).setDuration(150).start()
+                    Log.d("MainActivity", "Drag exited bottom bar")
+                    true
+                }
+                
+                DragEvent.ACTION_DROP -> {
+                    bottomBar.animate().alpha(1f).setDuration(150).start()
+                    
+                    if (dragData != null) {
+                        Log.d("MainActivity", "Drop on bottom bar: ${dragData.app.label}")
+                        
+                        // Check if there's space in bottom bar (max 3 apps)
+                        if (bottomBar.childCount < 3) {
+                            // Add to bottom bar
+                            val newAppView = createBottomBarAppView(
+                                dragData.app.label, 
+                                dragData.app.icon, 
+                                dragData.app.packageName
+                            )
+                            bottomBar.addView(newAppView)
+                            
+                            // Remove from home screen if it came from there
+                            if (dragData.isFromHomeScreen && dragData.originalPosition >= 0) {
+                                homeScreenApps[dragData.originalPosition] = null
+                                homeGridAdapter.notifyItemChanged(dragData.originalPosition)
+                            }
+                            
+                            Toast.makeText(this, "${dragData.app.label} added to dock", Toast.LENGTH_SHORT).show()
+                            true
+                        } else {
+                            Toast.makeText(this, "Dock is full", Toast.LENGTH_SHORT).show()
+                            false
+                        }
+                    } else {
+                        false
+                    }
+                }
+                
+                DragEvent.ACTION_DRAG_ENDED -> {
+                    bottomBar.animate().alpha(1f).setDuration(150).start()
+                    true
+                }
+                
+                else -> false
+            }
+        }
         // Dedicated drop handler for REMOVE zone
         removeAppZone.setOnDragListener { _, event ->
             val dragData = event.localState as? DragData
@@ -615,7 +678,7 @@ class MainActivity : AppCompatActivity() {
                 val appLabel = pm.getApplicationLabel(appInfo).toString()
                 val appIcon = pm.getApplicationIcon(packageName)
 
-                val appView = createBottomBarAppView(appLabel, appIcon, packageName, false)
+                val appView = createBottomBarAppView(appLabel, appIcon, packageName)
                 bottomBar.addView(appView)
             } catch (e: Exception) {
                 Log.e("MainActivity", "Bottom bar app not found: $packageName")
@@ -668,31 +731,12 @@ class MainActivity : AppCompatActivity() {
         // Long click for drag
         appView.setOnLongClickListener {
             val app = AppObject(label, icon, packageName)
+            Log.d("MainActivity", "Starting bottom bar app drag: ${app.label}")
             
-            if (allowCopy) {
-                // Allow copying to home screen
-                val clipData = ClipData.newPlainText("bottom_app", packageName)
-                val dragData = DragData(app, -1, false)
-                val shadow = View.DragShadowBuilder(createDragShadow(app))
-                appView.startDragAndDrop(clipData, shadow, dragData, View.DRAG_FLAG_GLOBAL)
-            } else {
-                // Move from bottom bar to home screen
-                if (!isAppAlreadyOnHomeScreen(app)) {
-                    val emptySlot = findNextEmptySlot(0)
-                    if (emptySlot != -1) {
-                        homeScreenApps[emptySlot] = app
-                        homeGridAdapter.notifyItemChanged(emptySlot)
-                        
-                        // Remove from bottom bar
-                        bottomBar.removeView(appView)
-                        Toast.makeText(this, "${app.label} moved to home screen", Toast.LENGTH_SHORT).show()
-                    } else {
-                        Toast.makeText(this, "Home screen is full", Toast.LENGTH_SHORT).show()
-                    }
-                } else {
-                    Toast.makeText(this, "${app.label} is already on home screen", Toast.LENGTH_SHORT).show()
-                }
-            }
+            val clipData = ClipData.newPlainText("bottom_app", packageName)
+            val dragData = DragData(app, -1, false) // Not from home screen
+            val shadow = View.DragShadowBuilder(createDragShadow(app))
+            appView.startDragAndDrop(clipData, shadow, dragData, View.DRAG_FLAG_GLOBAL)
             true
         }
 
