@@ -4,8 +4,7 @@
     <queries>
         <!-- Allow querying these specific packages -->
         <package android:name="com.ATS.MySlates" />
-        <package android:name="com.ATS.MySlates.Parent" />
-        <package android:name="com.ATS.MySlates.Teacher" />
+        <package android:name="com.ATS.MySlates.Kids" />
         <package android:name="com.adobe.reader" />
     </queries>
 
