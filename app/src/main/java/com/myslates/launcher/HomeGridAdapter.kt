@@ -66,12 +66,19 @@ class HomeGridAdapter(
             val draggedApp = dragData?.app
 
             when (event.action) {
-                DragEvent.ACTION_DRAG_STARTED -> true
+                DragEvent.ACTION_DRAG_STARTED -> {
+                    Log.d("HomeGridAdapter", "Drag started at position $position")
+                    true
+                }
 
                 DragEvent.ACTION_DRAG_ENTERED -> {
                     if (apps[position] == null) {
                         holder.emptySlot.setBackgroundColor(Color.parseColor("#4CAF50"))
                         holder.emptySlot.alpha = 0.7f
+                        holder.itemView.animate().scaleX(1.05f).scaleY(1.05f).setDuration(150).start()
+                        Log.d("HomeGridAdapter", "Drag entered empty slot at $position")
+                    } else {
+                        holder.itemView.animate().scaleX(0.95f).scaleY(0.95f).setDuration(150).start()
                     }
                     true
                 }
@@ -79,29 +86,48 @@ class HomeGridAdapter(
                 DragEvent.ACTION_DRAG_EXITED -> {
                     holder.emptySlot.setBackgroundColor(Color.TRANSPARENT)
                     holder.emptySlot.alpha = 0.3f
+                    holder.itemView.animate().scaleX(1f).scaleY(1f).setDuration(150).start()
+                    Log.d("HomeGridAdapter", "Drag exited position $position")
                     true
                 }
 
                 DragEvent.ACTION_DROP -> {
-                    if (draggedApp != null) {
+                    holder.emptySlot.setBackgroundColor(Color.TRANSPARENT)
+                    holder.emptySlot.alpha = 0.3f
+                    holder.itemView.animate().scaleX(1f).scaleY(1f).setDuration(150).start()
+
+                    if (draggedApp != null && apps[position] == null) {
+                        Log.d("HomeGridAdapter", "Dropping ${draggedApp.label} at position $position")
                         val accepted = onEmptySlotDrop(position, draggedApp)
                         if (accepted) {
                             notifyItemChanged(position)
-                            return@setOnDragListener true
+                            Log.d("HomeGridAdapter", "Drop accepted at position $position")
+                            true
+                        } else {
+                            Log.d("HomeGridAdapter", "Drop rejected at position $position")
+                            false
                         }
+                    } else if (draggedApp != null && apps[position] != null) {
+                        // Try to swap or find next empty slot
+                        Log.d("HomeGridAdapter", "Position $position occupied, trying to find alternative")
+                        false
+                    } else {
+                        Log.d("HomeGridAdapter", "Invalid drop at position $position")
+                        false
                     }
-                    false
                 }
 
                 DragEvent.ACTION_DRAG_ENDED -> {
                     holder.emptySlot.setBackgroundColor(Color.TRANSPARENT)
                     holder.emptySlot.alpha = 0.3f
+                    holder.itemView.animate().scaleX(1f).scaleY(1f).setDuration(150).start()
 
                     if (!event.result && dragData?.isFromHomeScreen == true) {
                         val originalPosition = dragData.originalPosition
-                        if (apps[originalPosition] == null) {
+                        if (originalPosition >= 0 && originalPosition < apps.size && apps[originalPosition] == null) {
                             apps[originalPosition] = dragData.app
                             notifyItemChanged(originalPosition)
+                            Log.d("HomeGridAdapter", "Restored app to original position $originalPosition")
                         }
                     }
                     true
@@ -110,7 +136,6 @@ class HomeGridAdapter(
                 else -> false
             }
         }
-
     }
 
     private fun addTouchFeedback(view: View) {
