@@ -63,16 +63,19 @@ class AppAdapter(
         view.setOnLongClickListener {
             Log.d("AppAdapter", "Long clicked on ${app.label}")
 
-            val clipData = ClipData.newPlainText("package", app.packageName)
+            val clipData = ClipData.newPlainText("drawer_app", app.packageName)
+            val dragData = DragData(app, -1, false)
             val shadow = View.DragShadowBuilder(view)
 
             view.startDragAndDrop(
                 clipData,
                 shadow,
-                app, // localState is AppObject
+                dragData, // localState is DragData
                 View.DRAG_FLAG_GLOBAL
             )
 
+            // Trigger the drag handler
+            onAppDrag(app)
             true
         }
 
