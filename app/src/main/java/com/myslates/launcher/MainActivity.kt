@@ -52,7 +52,7 @@ class MainActivity : AppCompatActivity() {
     private var isDragging = false
     private var isPanelOpen = false
     private var currentPage = 0
-    private val maxAppsPerPage = 15 // 3x5 grid
+    private val maxAppsPerPage = 6 // 2x3 grid
     private val homeScreenApps = mutableListOf<AppObject?>()
 
     // Fast duplicate check (kept in lockstep with homeScreenApps)
@@ -61,18 +61,24 @@ class MainActivity : AppCompatActivity() {
     // Security components
     private lateinit var devicePolicyManager: DevicePolicyManager
     private lateinit var adminComponent: ComponentName
-    private val PARENTAL_PIN = "123456" // TODO: store securely
+    private val PARENTAL_PIN = "123456" // TODO: secure storage for production
+
+    // Kiosk pref
+    private val PREFS by lazy { getSharedPreferences("launcher_prefs", MODE_PRIVATE) }
+    private var kioskEnabled: Boolean
+        get() = PREFS.getBoolean("kiosk_enabled", false)
+        set(value) { PREFS.edit().putBoolean("kiosk_enabled", value).apply() }
 
     private val isTablet get() = resources.configuration.smallestScreenWidthDp >= 600
-    private val HOME_ICON_DP   get() = if (isTablet) 140 else 90
-    private val DRAWER_ICON_DP get() = if (isTablet) 140 else 90
-    private val DOCK_ICON_DP get() = if (isTablet) 140 else 90
-    private val LABEL_SP       get() = if (isTablet) 18f else 14f
-    private val TIME_SP        get() = if (isTablet) 100f else 80f
-    private val DATE_SP        get() = if (isTablet) 40f else 28f
+    private val DOCK_MAX = 2
+    private val HOME_ICON_DP   get() = if (isTablet) 140 else 110
+    private val DRAWER_ICON_DP get() = if (isTablet) 140 else 110
+    private val DOCK_ICON_DP   get() = if (isTablet) 140 else 110
+    private val LABEL_SP       get() = if (isTablet) 20f else 16f
+    private val TIME_SP        get() = if (isTablet) 96f else 72f
+    private val DATE_SP        get() = if (isTablet) 28f else 20f
 
     private val allowedApps = listOf(
-        "com.android.settings",
         "com.ATS.MySlates",
         "com.adobe.reader"
     )
@@ -101,6 +107,9 @@ class MainActivity : AppCompatActivity() {
         startTimeUpdater()
         setupSwipeGestures()
 
+        // Long-press clock → Admin panel (PIN → Toggle kiosk)
+        timeText.setOnLongClickListener { showAdminPanel(); true }
+
         // Initialize with empty grid
         repeat(maxAppsPerPage) { homeScreenApps.add(null) }
         homePackages.clear()
@@ -109,19 +118,23 @@ class MainActivity : AppCompatActivity() {
 
         applyTabletScaling()
 
-        // Kiosk disabled for safe testing on personal devices
-        // enableKioskMode()
+        // Safety: only re-enter kiosk if previously enabled
+        if (kioskEnabled) enableKioskModeIfPermitted()
     }
+
+    // ---------- SECURITY / KIOSK ----------
 
     private fun initializeSecurity() {
         devicePolicyManager = getSystemService(DEVICE_POLICY_SERVICE) as DevicePolicyManager
         adminComponent = ComponentName(this, LauncherDeviceAdminReceiver::class.java)
 
         if (!devicePolicyManager.isAdminActive(adminComponent)) {
-            val intent = Intent(DevicePolicyManager.ACTION_ADD_DEVICE_ADMIN).apply {
-                putExtra(DevicePolicyManager.EXTRA_DEVICE_ADMIN, adminComponent)
-                putExtra(DevicePolicyManager.EXTRA_ADD_EXPLANATION, "Enable device admin to secure the launcher")
-            }
+            val intent = Intent(DevicePolicyManager.ACTION_ADD_DEVICE_ADMIN)
+            intent.putExtra(DevicePolicyManager.EXTRA_DEVICE_ADMIN, adminComponent)
+            intent.putExtra(
+                DevicePolicyManager.EXTRA_ADD_EXPLANATION,
+                "Enable device admin to secure the launcher"
+            )
             startActivity(intent)
         }
         applyUserRestrictions()
@@ -141,22 +154,78 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    //private fun enableKioskMode() {
-    // try {
-    //if (devicePolicyManager.isAdminActive(adminComponent)) {
-    /// Set as device owner if possible
-    //if (devicePolicyManager.isDeviceOwnerApp(packageName)) {
-    /// Enable lock task mode
-    //devicePolicyManager.setLockTaskPackages(adminComponent, arrayOf(packageName))
-    //startLockTask()
-    //Log.d("Security", "Kiosk mode enabled")
-    //}
-    //}
-    //} catch (e: Exception) {
-    // Log.e("Security", "Failed to enable kiosk mode", e)
-    // }
-    //}
+    private fun enableKioskModeIfPermitted(): Boolean {
+        return try {
+            if (devicePolicyManager.isAdminActive(adminComponent) &&
+                devicePolicyManager.isDeviceOwnerApp(packageName)
+            ) {
+                devicePolicyManager.setLockTaskPackages(adminComponent, arrayOf(packageName))
+                startLockTask()
+                true
+            } else {
+                Toast.makeText(this, "Device owner not granted. Kiosk unavailable.", Toast.LENGTH_LONG).show()
+                false
+            }
+        } catch (e: Exception) {
+            Log.e("Security", "Failed enabling kiosk", e)
+            false
+        }
+    }
 
+    private fun disableKioskModeIfActive() {
+        try { stopLockTask() } catch (_: Exception) { /* ignore */ }
+    }
+
+    private fun showAdminPanel() {
+        val pinInput = EditText(this).apply {
+            inputType = android.text.InputType.TYPE_CLASS_NUMBER or android.text.InputType.TYPE_NUMBER_VARIATION_PASSWORD
+            hint = "Enter 6-digit PIN"
+            maxLines = 1
+            setPadding(dpToPx(16), dpToPx(16), dpToPx(16), dpToPx(16))
+        }
+        AlertDialog.Builder(this)
+            .setTitle("Admin Access")
+            .setView(pinInput)
+            .setPositiveButton("Continue") { _, _ ->
+                val ok = pinInput.text?.toString() == PARENTAL_PIN
+                if (!ok) {
+                    Toast.makeText(this, "Incorrect PIN", Toast.LENGTH_SHORT).show()
+                    return@setPositiveButton
+                }
+                val container = LinearLayout(this).apply {
+                    orientation = LinearLayout.VERTICAL
+                    setPadding(dpToPx(16), dpToPx(8), dpToPx(16), dpToPx(8))
+                }
+                val kioskSwitch = Switch(this).apply {
+                    text = "Enable Kiosk Mode"
+                    isChecked = kioskEnabled
+                }
+                container.addView(kioskSwitch)
+
+                AlertDialog.Builder(this)
+                    .setTitle("Admin Panel")
+                    .setView(container)
+                    .setPositiveButton("Apply") { _, _ ->
+                        val wantKiosk = kioskSwitch.isChecked
+                        if (wantKiosk && !kioskEnabled) {
+                            if (enableKioskModeIfPermitted()) {
+                                kioskEnabled = true
+                                Toast.makeText(this, "Kiosk enabled", Toast.LENGTH_SHORT).show()
+                            }
+                        } else if (!wantKiosk && kioskEnabled) {
+                            disableKioskModeIfActive()
+                            kioskEnabled = false
+                            Toast.makeText(this, "Kiosk disabled", Toast.LENGTH_SHORT).show()
+                        }
+                    }
+                    .setNegativeButton("Close", null)
+                    .show()
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
+    // ---------- LAYOUT SCALING ----------
 
     private fun applyTabletScaling() {
         timeText.textSize = TIME_SP
@@ -205,6 +274,8 @@ class MainActivity : AppCompatActivity() {
 
         updateWeather()
     }
+
+    // ---------- GESTURES ----------
 
     private fun setupSwipeGestures() {
         gestureDetector = GestureDetector(this, object : GestureDetector.SimpleOnGestureListener() {
@@ -262,6 +333,8 @@ class MainActivity : AppCompatActivity() {
         weatherText.setOnTouchListener(gestureListener)
     }
 
+    // ---------- HOME GRID ----------
+
     private fun setupHomeGrid() {
         homeGridAdapter = HomeGridAdapter(
             context = this,
@@ -271,7 +344,7 @@ class MainActivity : AppCompatActivity() {
             onEmptySlotDrop = { position, app -> handleAppDropWithDuplicateCheck(position, app) },
             onAppDrag = { app, position -> startHomeAppDrag(app, position) }
         )
-        homeGridRecyclerView.layoutManager = GridLayoutManager(this, 3)
+        homeGridRecyclerView.layoutManager = GridLayoutManager(this, 2)
         homeGridRecyclerView.adapter = homeGridAdapter
         homeGridRecyclerView.itemAnimator = null
     }
@@ -291,7 +364,7 @@ class MainActivity : AppCompatActivity() {
                 }
 
                 DragEvent.ACTION_DROP -> {
-                    // Drop on the home surface: place in first empty slot (deduped)
+                    // Drop on the home surface: place in first empty slot if not duplicate
                     if (dragData != null && !dragData.isFromHomeScreen) {
                         if (!isAppAlreadyOnHomeScreen(dragData.app)) {
                             val emptySlot = findNextEmptySlot(0)
@@ -313,7 +386,7 @@ class MainActivity : AppCompatActivity() {
                     isDragging = false
                     hideDragFeedback()
 
-                    // If drop succeeded and source was DOCK, remove the dock view
+                    // If drop succeeded and source was DOCK, remove the dock view (move, not copy)
                     if (event.result && dragData?.source == DragData.Source.DOCK) {
                         dragData.sourceView?.let { bottomBar.removeView(it) }
                     }
@@ -345,7 +418,7 @@ class MainActivity : AppCompatActivity() {
                         return@setOnDragListener false
                     }
 
-                    // Avoid duplicates in dock by tag (packageName)
+                    // Avoid duplicate items in dock by tag (packageName)
                     if ((0 until bottomBar.childCount).any {
                             (bottomBar.getChildAt(it).tag as? String) == dragData.app.packageName
                         }) {
@@ -450,9 +523,7 @@ class MainActivity : AppCompatActivity() {
         )
         val shadow = View.DragShadowBuilder(createDragShadow(app))
         homeGridRecyclerView.startDragAndDrop(clipData, shadow, dragData, View.DRAG_FLAG_GLOBAL)
-
-        // Clear the slot while dragging
-        clearSlot(position)
+        clearSlot(position) // clear while dragging
     }
 
     // ---------- HOME GRID HELPERS (duplicate-proof) ----------
@@ -461,10 +532,7 @@ class MainActivity : AppCompatActivity() {
         homePackages.contains(app.packageName)
 
     private fun putAppAt(position: Int, app: AppObject) {
-        // If overwriting a different app, remove it from the set first
-        homeScreenApps[position]?.let { existing ->
-            homePackages.remove(existing.packageName)
-        }
+        homeScreenApps[position]?.let { existing -> homePackages.remove(existing.packageName) }
         homeScreenApps[position] = app
         homePackages.add(app.packageName)
         homeGridAdapter.notifyItemChanged(position)
@@ -482,9 +550,7 @@ class MainActivity : AppCompatActivity() {
             Toast.makeText(this, "${app.label} is already on home screen", Toast.LENGTH_SHORT).show()
             return false
         }
-        if (homeScreenApps[position] == null) {
-            putAppAt(position, app); return true
-        }
+        if (homeScreenApps[position] == null) { putAppAt(position, app); return true }
         val next = findNextEmptySlot(position)
         if (next != -1) { putAppAt(next, app); return true }
         Toast.makeText(this, "No empty slot available", Toast.LENGTH_SHORT).show()
@@ -523,10 +589,8 @@ class MainActivity : AppCompatActivity() {
                 AppObject(label, icon, it.packageName)
             }
 
-        adapter = AppAdapter(this, allFilteredApps) { app ->
-            handleDrawerAppDrag(app)
-        }
-        appGridView.numColumns = 3
+        adapter = AppAdapter(this, allFilteredApps) { app -> handleDrawerAppDrag(app) }
+        appGridView.numColumns = 2
         appGridView.adapter = adapter
 
         searchInput.addTextChangedListener(object : android.text.TextWatcher {
@@ -553,12 +617,10 @@ class MainActivity : AppCompatActivity() {
     private fun loadBottomBarApps() {
         bottomBar.removeAllViews()
         val bottomApps = listOf(
-            "com.android.settings",
             "com.ATS.MySlates",
             "com.adobe.reader"
         )
-
-        bottomApps.forEach { packageName ->
+        bottomApps.take(DOCK_MAX).forEach { packageName ->
             try {
                 val pm = packageManager
                 val appInfo = pm.getApplicationInfo(packageName, 0)
@@ -634,28 +696,6 @@ class MainActivity : AppCompatActivity() {
 
     // ---------- PIN / LAUNCH / PANELS / UTIL ----------
 
-    private fun showPinDialog(onSuccess: () -> Unit) {
-        val editText = EditText(this).apply {
-            inputType = android.text.InputType.TYPE_CLASS_NUMBER or android.text.InputType.TYPE_NUMBER_VARIATION_PASSWORD
-            hint = "Enter 6-digit PIN"
-            maxLines = 1
-            setPadding(dpToPx(16), dpToPx(16), dpToPx(16), dpToPx(16))
-        }
-
-        AlertDialog.Builder(this)
-            .setTitle("Parental Control")
-            .setMessage("Enter PIN to access Settings")
-            .setView(editText)
-            .setPositiveButton("OK") { _, _ ->
-                val enteredPin = editText.text.toString()
-                if (enteredPin == PARENTAL_PIN) onSuccess()
-                else Toast.makeText(this, "Incorrect PIN", Toast.LENGTH_SHORT).show()
-            }
-            .setNegativeButton("Cancel", null)
-            .setCancelable(false)
-            .show()
-    }
-
     private fun addModernTouchFeedback(view: View) {
         view.setOnTouchListener { v, event ->
             when (event.action) {
@@ -685,6 +725,28 @@ class MainActivity : AppCompatActivity() {
             Toast.makeText(this, "Cannot launch app: ${e.message}", Toast.LENGTH_SHORT).show()
             Log.e("MainActivity", "Failed to launch $packageName", e)
         }
+    }
+
+    private fun showPinDialog(onSuccess: () -> Unit) {
+        val editText = EditText(this).apply {
+            inputType = android.text.InputType.TYPE_CLASS_NUMBER or android.text.InputType.TYPE_NUMBER_VARIATION_PASSWORD
+            hint = "Enter 6-digit PIN"
+            maxLines = 1
+            setPadding(dpToPx(16), dpToPx(16), dpToPx(16), dpToPx(16))
+        }
+
+        AlertDialog.Builder(this)
+            .setTitle("Parental Control")
+            .setMessage("Enter PIN to access Settings")
+            .setView(editText)
+            .setPositiveButton("OK") { _, _ ->
+                val enteredPin = editText.text.toString()
+                if (enteredPin == PARENTAL_PIN) onSuccess()
+                else Toast.makeText(this, "Incorrect PIN", Toast.LENGTH_SHORT).show()
+            }
+            .setNegativeButton("Cancel", null)
+            .setCancelable(false)
+            .show()
     }
 
     private fun slideUpDrawer() {
@@ -984,7 +1046,7 @@ class MainActivity : AppCompatActivity() {
             isDrawerOpen -> slideDownDrawer()
             isPanelOpen -> hidePanels()
             else -> {
-                // If not in kiosk mode, allow back
+                // Allow back only if not in lock task
                 val am = getSystemService(android.app.ActivityManager::class.java)
                 val inLockTask = am.lockTaskModeState != android.app.ActivityManager.LOCK_TASK_MODE_NONE
                 if (!inLockTask) super.onBackPressed()

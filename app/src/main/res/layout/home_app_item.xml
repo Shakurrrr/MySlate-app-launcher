@@ -8,8 +8,8 @@
 
     <ImageView
         android:id="@+id/home_app_icon"
-        android:layout_width="80dp"
-        android:layout_height="80dp"
+        android:layout_width="144dp"
+        android:layout_height="144dp"
         android:scaleType="fitCenter"
         android:background="@drawable/icon_background"
         android:padding="6dp" />
@@ -18,11 +18,13 @@
         android:id="@+id/home_app_label"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
+        android:layout_marginTop="8dp"
         android:paddingTop="4dp"
         android:textColor="#FFFFFF"
-        android:textSize="16sp"
+        android:textSize="18sp"
         android:ellipsize="end"
         android:maxLines="1"
-        android:gravity="center" />
+        android:gravity="center"
+        android:includeFontPadding="false"/>
 
 </LinearLayout>
