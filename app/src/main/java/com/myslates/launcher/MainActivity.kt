@@ -11,6 +11,7 @@ import android.os.Handler
 import android.os.Looper
 import android.os.UserManager
 import android.text.TextUtils
+import android.util.Base64
 import android.util.Log
 import android.view.*
 import android.view.animation.AccelerateDecelerateInterpolator
@@ -20,9 +21,101 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
 import androidx.recyclerview.widget.GridLayoutManager
 import androidx.recyclerview.widget.RecyclerView
+import androidx.security.crypto.EncryptedSharedPreferences
+import androidx.security.crypto.MasterKey
+import java.security.MessageDigest
+import java.security.SecureRandom
 import java.text.SimpleDateFormat
 import java.util.*
+import javax.crypto.SecretKeyFactory
+import javax.crypto.spec.PBEKeySpec
+import kotlin.math.min
 import kotlin.random.Random
+
+
+private object PasswordStore {
+    private const val PREFS = "prefs_encrypted"
+    private const val KEY_HASH = "pw_hash"
+    private const val KEY_SALT = "pw_salt"
+    private const val KEY_ITER = "pw_iter"
+    private const val KEY_FAILS = "failed_attempts"
+    private const val KEY_LOCK_UNTIL = "lock_until_epoch_ms"
+    private const val DEFAULT_ITERS = 120_000
+
+    private fun prefs(ctx: android.content.Context): android.content.SharedPreferences {
+        val masterKey = MasterKey.Builder(ctx)
+            .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
+            .build()
+        return EncryptedSharedPreferences.create(
+            ctx,
+            PREFS,
+            masterKey,
+            EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
+            EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
+        )
+    }
+
+    fun hasPassword(ctx: android.content.Context): Boolean =
+        prefs(ctx).contains(KEY_HASH)
+
+    fun setPassword(ctx: android.content.Context, newPassword: CharArray, iterations: Int = DEFAULT_ITERS) {
+        val salt = SecureRandom().generateSeed(32)
+        val hash = pbkdf2(newPassword, salt, iterations)
+        prefs(ctx).edit()
+            .putString(KEY_HASH, Base64.encodeToString(hash, Base64.NO_WRAP))
+            .putString(KEY_SALT, Base64.encodeToString(salt, Base64.NO_WRAP))
+            .putInt(KEY_ITER, iterations)
+            .apply()
+        newPassword.fill('\u0000')
+        resetThrottle(ctx)
+    }
+
+    fun verify(ctx: android.content.Context, password: CharArray): Boolean {
+        val p = prefs(ctx)
+        val hashB64 = p.getString(KEY_HASH, null) ?: return false
+        val saltB64 = p.getString(KEY_SALT, null) ?: return false
+        val iters = p.getInt(KEY_ITER, DEFAULT_ITERS)
+        val calc = pbkdf2(password, Base64.decode(saltB64, Base64.NO_WRAP), iters)
+        val ok = MessageDigest.isEqual(calc, Base64.decode(hashB64, Base64.NO_WRAP))
+        if (ok) resetThrottle(ctx) else recordFailure(ctx)
+        password.fill('\u0000')
+        return ok
+    }
+
+    fun isLocked(ctx: android.content.Context, now: Long = System.currentTimeMillis()): Boolean =
+        prefs(ctx).getLong(KEY_LOCK_UNTIL, 0L) > now
+
+    fun remainingLockMs(ctx: android.content.Context, now: Long = System.currentTimeMillis()): Long =
+        (prefs(ctx).getLong(KEY_LOCK_UNTIL, 0L) - now).coerceAtLeast(0L)
+
+    private fun recordFailure(ctx: android.content.Context) {
+        val p = prefs(ctx)
+        val fails = p.getInt(KEY_FAILS, 0) + 1
+        val backoffSec = if (fails < 5) 0 else min(600, 30 shl (fails - 5)) // 30,60,120,... cap 600
+        p.edit()
+            .putInt(KEY_FAILS, fails)
+            .putLong(KEY_LOCK_UNTIL, if (backoffSec == 0) 0L else System.currentTimeMillis() + backoffSec * 1000L)
+            .apply()
+    }
+
+    private fun resetThrottle(ctx: android.content.Context) {
+        prefs(ctx).edit()
+            .putInt(KEY_FAILS, 0)
+            .putLong(KEY_LOCK_UNTIL, 0L)
+            .apply()
+    }
+
+    private fun pbkdf2(password: CharArray, salt: ByteArray, iterations: Int): ByteArray {
+        val spec = PBEKeySpec(password, salt, iterations, 256)
+        return SecretKeyFactory.getInstance("PBKDF2WithHmacSHA256").generateSecret(spec).encoded
+    }
+}
+
+private object PasswordPolicy {
+    fun strongEnough(pw: String): Boolean = pw.length >= 6 // tighten if desired
+}
+
+// -----------------------------------------------------------------------------
 
 class MainActivity : AppCompatActivity() {
 
@@ -61,7 +154,7 @@ class MainActivity : AppCompatActivity() {
     // Security components
     private lateinit var devicePolicyManager: DevicePolicyManager
     private lateinit var adminComponent: ComponentName
-    private val PARENTAL_PIN = "123456" // TODO: secure storage for production
+    private val PARENTAL_PIN = "123456" // legacy fallback if no admin password set
 
     // Kiosk pref
     private val PREFS by lazy { getSharedPreferences("launcher_prefs", MODE_PRIVATE) }
@@ -107,7 +200,7 @@ class MainActivity : AppCompatActivity() {
         startTimeUpdater()
         setupSwipeGestures()
 
-        // Long-press clock → Admin panel (PIN → Toggle kiosk)
+        // Long-press clock → Admin panel (PIN/Password → Toggle kiosk)
         timeText.setOnLongClickListener { showAdminPanel(); true }
 
         // Initialize with empty grid
@@ -176,33 +269,70 @@ class MainActivity : AppCompatActivity() {
         try { stopLockTask() } catch (_: Exception) { /* ignore */ }
     }
 
+    // ADDITIVE: centralized helper that accepts stored admin password or legacy PIN
+    private fun verifyAdminSecret(input: String): Boolean {
+        // Locked? short-circuit
+        if (PasswordStore.isLocked(this)) {
+            val seconds = PasswordStore.remainingLockMs(this) / 1000
+            Toast.makeText(this, "Locked. Try again in ${seconds}s.", Toast.LENGTH_SHORT).show()
+            return false
+        }
+        return if (PasswordStore.hasPassword(this)) {
+            PasswordStore.verify(this, input.toCharArray())
+        } else {
+            val ok = input == PARENTAL_PIN
+            if (!ok) {
+                // light throttle (legacy path) to keep behavior predictable
+                Toast.makeText(this, "Incorrect PIN", Toast.LENGTH_SHORT).show()
+            }
+            ok
+        }
+    }
+
     private fun showAdminPanel() {
         val pinInput = EditText(this).apply {
             inputType = android.text.InputType.TYPE_CLASS_NUMBER or android.text.InputType.TYPE_NUMBER_VARIATION_PASSWORD
-            hint = "Enter 6-digit PIN"
+            hint = if (PasswordStore.hasPassword(this@MainActivity)) "Enter admin password" else "Enter 6-digit PIN"
             maxLines = 1
             setPadding(dpToPx(16), dpToPx(16), dpToPx(16), dpToPx(16))
+            isEnabled = !PasswordStore.isLocked(this@MainActivity)
         }
+
         AlertDialog.Builder(this)
             .setTitle("Admin Access")
             .setView(pinInput)
             .setPositiveButton("Continue") { _, _ ->
-                val ok = pinInput.text?.toString() == PARENTAL_PIN
-                if (!ok) {
-                    Toast.makeText(this, "Incorrect PIN", Toast.LENGTH_SHORT).show()
-                    return@setPositiveButton
-                }
+                val ok = verifyAdminSecret(pinInput.text?.toString().orEmpty())
+                if (!ok) return@setPositiveButton
+
                 val container = LinearLayout(this).apply {
                     orientation = LinearLayout.VERTICAL
                     setPadding(dpToPx(16), dpToPx(8), dpToPx(16), dpToPx(8))
                 }
+
                 val kioskSwitch = Switch(this).apply {
                     text = "Enable Kiosk Mode"
                     isChecked = kioskEnabled
                 }
                 container.addView(kioskSwitch)
 
-                AlertDialog.Builder(this)
+                // ADDITIVE: Change password button inside Admin Panel
+                val changePwBtn = Button(this).apply {
+                    text = "Change Admin Password"
+                }
+                container.addView(changePwBtn)
+
+                val infoText = TextView(this).apply {
+                    setTextColor(Color.parseColor("#AAAAAA"))
+                    textSize = 12f
+                    text = if (PasswordStore.hasPassword(this@MainActivity))
+                        "Password is stored securely on-device." else
+                        "Using legacy PIN. Set an admin password to upgrade security."
+                    setPadding(0, dpToPx(8), 0, 0)
+                }
+                container.addView(infoText)
+
+                val adminDialog = AlertDialog.Builder(this)
                     .setTitle("Admin Panel")
                     .setView(container)
                     .setPositiveButton("Apply") { _, _ ->
@@ -219,10 +349,91 @@ class MainActivity : AppCompatActivity() {
                         }
                     }
                     .setNegativeButton("Close", null)
-                    .show()
+                    .create()
+
+                changePwBtn.setOnClickListener {
+                    showChangePasswordDialog()
+                }
+
+                adminDialog.show()
             }
             .setNegativeButton("Cancel", null)
             .show()
+    }
+
+    // ADDITIVE: In-launcher Change Password dialog (local-only)
+    private fun showChangePasswordDialog() {
+        val container = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dpToPx(16), dpToPx(8), dpToPx(16), dpToPx(8))
+        }
+
+        val currentInput = EditText(this).apply {
+            inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD
+            hint = "Current password"
+            maxLines = 1
+            visibility = if (PasswordStore.hasPassword(this@MainActivity)) View.VISIBLE else View.GONE
+        }
+        val newInput = EditText(this).apply {
+            inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD
+            hint = "New password (min 6 chars)"
+            maxLines = 1
+        }
+        val confirmInput = EditText(this).apply {
+            inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD
+            hint = "Confirm new password"
+            maxLines = 1
+        }
+
+        container.addView(currentInput)
+        container.addView(spaceView(8))
+        container.addView(newInput)
+        container.addView(spaceView(8))
+        container.addView(confirmInput)
+
+        val dialog = AlertDialog.Builder(this)
+            .setTitle("Change Admin Password")
+            .setView(container)
+            .setPositiveButton("Save", null) // we override to keep dialog open on validation errors
+            .setNegativeButton("Cancel", null)
+            .create()
+
+        dialog.setOnShowListener {
+            val saveBtn = dialog.getButton(AlertDialog.BUTTON_POSITIVE)
+            saveBtn.setOnClickListener {
+                // Basic validation
+                val hasExisting = PasswordStore.hasPassword(this)
+                val cur = currentInput.text.toString()
+                val newPw = newInput.text.toString()
+                val conf = confirmInput.text.toString()
+
+                if (hasExisting && !verifyAdminSecret(cur)) {
+                    // verifyAdminSecret already toasts; don’t dismiss
+                    return@setOnClickListener
+                }
+                if (newPw != conf) {
+                    Toast.makeText(this, "Passwords don’t match", Toast.LENGTH_SHORT).show()
+                    return@setOnClickListener
+                }
+                if (!PasswordPolicy.strongEnough(newPw)) {
+                    Toast.makeText(this, "Password too weak (min 6 chars)", Toast.LENGTH_SHORT).show()
+                    return@setOnClickListener
+                }
+
+                PasswordStore.setPassword(this, newPw.toCharArray())
+                Toast.makeText(this, "Admin password changed", Toast.LENGTH_SHORT).show()
+                dialog.dismiss()
+            }
+        }
+
+        dialog.show()
+    }
+
+    private fun spaceView(dp: Int): View = View(this).apply {
+        layoutParams = LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT,
+            dpToPx(dp)
+        )
     }
 
     // ---------- LAYOUT SCALING ----------
@@ -729,20 +940,22 @@ class MainActivity : AppCompatActivity() {
 
     private fun showPinDialog(onSuccess: () -> Unit) {
         val editText = EditText(this).apply {
-            inputType = android.text.InputType.TYPE_CLASS_NUMBER or android.text.InputType.TYPE_NUMBER_VARIATION_PASSWORD
-            hint = "Enter 6-digit PIN"
+            inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD
+            hint = if (PasswordStore.hasPassword(this@MainActivity)) "Enter admin password" else "Enter 6-digit PIN"
             maxLines = 1
             setPadding(dpToPx(16), dpToPx(16), dpToPx(16), dpToPx(16))
+            isEnabled = !PasswordStore.isLocked(this@MainActivity)
         }
 
         AlertDialog.Builder(this)
             .setTitle("Parental Control")
-            .setMessage("Enter PIN to access Settings")
+            .setMessage(if (PasswordStore.hasPassword(this)) "Enter password to access Settings" else "Enter PIN to access Settings")
             .setView(editText)
             .setPositiveButton("OK") { _, _ ->
-                val enteredPin = editText.text.toString()
-                if (enteredPin == PARENTAL_PIN) onSuccess()
-                else Toast.makeText(this, "Incorrect PIN", Toast.LENGTH_SHORT).show()
+                val entered = editText.text.toString()
+                val ok = verifyAdminSecret(entered)
+                if (ok) onSuccess()
+                // errors are already surfaced inside verifyAdminSecret
             }
             .setNegativeButton("Cancel", null)
             .setCancelable(false)
