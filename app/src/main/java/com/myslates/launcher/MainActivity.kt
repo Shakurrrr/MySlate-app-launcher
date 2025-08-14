@@ -1,15 +1,15 @@
 package com.myslates.launcher
 
-import android.app.admin.DevicePolicyManager
+import android.app.ActivityManager
 import android.content.ClipData
-import android.content.ComponentName
+import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Color
+import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
-import android.os.UserManager
 import android.text.TextUtils
 import android.util.Base64
 import android.util.Log
@@ -31,9 +31,8 @@ import javax.crypto.SecretKeyFactory
 import javax.crypto.spec.PBEKeySpec
 import kotlin.math.min
 import kotlin.random.Random
-import com.myslates.launcher.security.PasswordStore
 
-
+// NOTE: Using the in-file PasswordStore (no import of com.myslates.launcher.security.PasswordStore)
 
 private object PasswordStore {
     private const val PREFS = "prefs_encrypted"
@@ -43,6 +42,8 @@ private object PasswordStore {
     private const val KEY_FAILS = "failed_attempts"
     private const val KEY_LOCK_UNTIL = "lock_until_epoch_ms"
     private const val DEFAULT_ITERS = 120_000
+    /** Backoff starts after this many consecutive failures (used by UI) */
+    const val MAX_BEFORE_BACKOFF = 5
 
     private fun prefs(ctx: android.content.Context): android.content.SharedPreferences {
         val masterKey = MasterKey.Builder(ctx)
@@ -90,10 +91,14 @@ private object PasswordStore {
     fun remainingLockMs(ctx: android.content.Context, now: Long = System.currentTimeMillis()): Long =
         (prefs(ctx).getLong(KEY_LOCK_UNTIL, 0L) - now).coerceAtLeast(0L)
 
+    /** Expose current failed attempt count (used by UI) */
+    fun failedAttempts(ctx: android.content.Context): Int =
+        prefs(ctx).getInt(KEY_FAILS, 0)
+
     private fun recordFailure(ctx: android.content.Context) {
         val p = prefs(ctx)
         val fails = p.getInt(KEY_FAILS, 0) + 1
-        val backoffSec = if (fails < 5) 0 else min(600, 30 shl (fails - 5)) // 30,60,120,... cap 600
+        val backoffSec = if (fails < MAX_BEFORE_BACKOFF) 0 else min(600, 30 shl (fails - MAX_BEFORE_BACKOFF)) // 30,60,120,... cap 600
         p.edit()
             .putInt(KEY_FAILS, fails)
             .putLong(KEY_LOCK_UNTIL, if (backoffSec == 0) 0L else System.currentTimeMillis() + backoffSec * 1000L)
@@ -153,12 +158,10 @@ class MainActivity : AppCompatActivity() {
     // Fast duplicate check (kept in lockstep with homeScreenApps)
     private val homePackages = mutableSetOf<String>()
 
-    // Security components
-    private lateinit var devicePolicyManager: DevicePolicyManager
-    private lateinit var adminComponent: ComponentName
-    private val PARENTAL_PIN = "123456" // legacy fallback if no admin password set
+    // Security (legacy fallback if no admin password set)
+    private val PARENTAL_PIN = "123456"
 
-    // Kiosk pref
+    // Kiosk pref (kept; not used to gate startup anymore)
     private val PREFS by lazy { getSharedPreferences("launcher_prefs", MODE_PRIVATE) }
     private var kioskEnabled: Boolean
         get() = PREFS.getBoolean("kiosk_enabled", false)
@@ -194,7 +197,8 @@ class MainActivity : AppCompatActivity() {
         setTheme(R.style.Theme_MySlates_Dark)
         setContentView(R.layout.activity_main)
 
-        initializeSecurity()
+        // (Removed DevicePolicy/DeviceOwner path) — we run pure lock-task kiosk.
+
         initializeViews()
         setupDragAndDrop()
         setupHomeGrid()
@@ -202,7 +206,12 @@ class MainActivity : AppCompatActivity() {
         startTimeUpdater()
         setupSwipeGestures()
 
-        // Long-press clock → Admin panel (PIN/Password → Toggle kiosk)
+        // 🔒 Immediately enter kiosk mode when launcher starts (no Device Owner required)
+        if (!isLockTaskModeRunning()) {
+            enableKioskModeIfPermitted()
+        }
+
+        // Long-press clock → Admin panel (PIN/Password → exit kiosk or change password)
         timeText.setOnLongClickListener { showAdminPanel(); true }
 
         // Initialize with empty grid
@@ -212,58 +221,28 @@ class MainActivity : AppCompatActivity() {
         homeGridAdapter.notifyDataSetChanged()
 
         applyTabletScaling()
-
-        // Safety: only re-enter kiosk if previously enabled
-        if (kioskEnabled) enableKioskModeIfPermitted()
     }
 
-    // ---------- SECURITY / KIOSK ----------
-
-    private fun initializeSecurity() {
-        devicePolicyManager = getSystemService(DEVICE_POLICY_SERVICE) as DevicePolicyManager
-        adminComponent = ComponentName(this, LauncherDeviceAdminReceiver::class.java)
-
-        if (!devicePolicyManager.isAdminActive(adminComponent)) {
-            val intent = Intent(DevicePolicyManager.ACTION_ADD_DEVICE_ADMIN)
-            intent.putExtra(DevicePolicyManager.EXTRA_DEVICE_ADMIN, adminComponent)
-            intent.putExtra(
-                DevicePolicyManager.EXTRA_ADD_EXPLANATION,
-                "Enable device admin to secure the launcher"
-            )
-            startActivity(intent)
-        }
-        applyUserRestrictions()
-    }
-
-    private fun applyUserRestrictions() {
-        if (!devicePolicyManager.isAdminActive(adminComponent)) return
-        try {
-            devicePolicyManager.addUserRestriction(adminComponent, UserManager.DISALLOW_FACTORY_RESET)
-            devicePolicyManager.addUserRestriction(adminComponent, UserManager.DISALLOW_MODIFY_ACCOUNTS)
-            devicePolicyManager.addUserRestriction(adminComponent, UserManager.DISALLOW_INSTALL_APPS)
-            devicePolicyManager.addUserRestriction(adminComponent, UserManager.DISALLOW_UNINSTALL_APPS)
-            devicePolicyManager.addUserRestriction(adminComponent, UserManager.DISALLOW_USB_FILE_TRANSFER)
-            Log.d("Security", "User restrictions applied successfully")
-        } catch (e: Exception) {
-            Log.e("Security", "Failed to apply user restrictions", e)
-        }
-    }
+    // ---------- KIOSK (Lock Task) ----------
 
     private fun enableKioskModeIfPermitted(): Boolean {
         return try {
-            if (devicePolicyManager.isAdminActive(adminComponent) &&
-                devicePolicyManager.isDeviceOwnerApp(packageName)
-            ) {
-                devicePolicyManager.setLockTaskPackages(adminComponent, arrayOf(packageName))
-                startLockTask()
-                true
-            } else {
-                Toast.makeText(this, "Device owner not granted. Kiosk unavailable.", Toast.LENGTH_LONG).show()
-                false
-            }
+            startLockTask() // no device-owner requirement; user will be pinned to this task
+            true
         } catch (e: Exception) {
             Log.e("Security", "Failed enabling kiosk", e)
+            Toast.makeText(this, "Kiosk unavailable on this device", Toast.LENGTH_LONG).show()
             false
+        }
+    }
+
+    private fun isLockTaskModeRunning(): Boolean {
+        val activityManager = getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            activityManager.lockTaskModeState != ActivityManager.LOCK_TASK_MODE_NONE
+        } else {
+            @Suppress("DEPRECATION")
+            activityManager.isInLockTaskMode
         }
     }
 
@@ -273,7 +252,6 @@ class MainActivity : AppCompatActivity() {
 
     // ADDITIVE: centralized helper that accepts stored admin password or legacy PIN
     private fun verifyAdminSecret(input: String): Boolean {
-        // Locked? short-circuit
         if (PasswordStore.isLocked(this)) {
             val seconds = PasswordStore.remainingLockMs(this) / 1000
             Toast.makeText(this, "Locked. Try again in ${seconds}s.", Toast.LENGTH_SHORT).show()
@@ -283,87 +261,33 @@ class MainActivity : AppCompatActivity() {
             PasswordStore.verify(this, input.toCharArray())
         } else {
             val ok = input == PARENTAL_PIN
-            if (!ok) {
-                // light throttle (legacy path) to keep behavior predictable
-                Toast.makeText(this, "Incorrect PIN", Toast.LENGTH_SHORT).show()
-            }
+            if (!ok) Toast.makeText(this, "Incorrect PIN", Toast.LENGTH_SHORT).show()
             ok
         }
     }
 
     private fun showAdminPanel() {
-        val pinInput = EditText(this).apply {
-            inputType = android.text.InputType.TYPE_CLASS_NUMBER or android.text.InputType.TYPE_NUMBER_VARIATION_PASSWORD
-            hint = if (PasswordStore.hasPassword(this@MainActivity)) "Enter admin password" else "Enter 6-digit PIN"
-            maxLines = 1
-            setPadding(dpToPx(16), dpToPx(16), dpToPx(16), dpToPx(16))
-            isEnabled = !PasswordStore.isLocked(this@MainActivity)
-        }
-
-        AlertDialog.Builder(this)
-            .setTitle("Admin Access")
-            .setView(pinInput)
-            .setPositiveButton("Continue") { _, _ ->
-                val ok = verifyAdminSecret(pinInput.text?.toString().orEmpty())
-                if (!ok) return@setPositiveButton
-
-                val container = LinearLayout(this).apply {
-                    orientation = LinearLayout.VERTICAL
-                    setPadding(dpToPx(16), dpToPx(8), dpToPx(16), dpToPx(8))
-                }
-
-                val kioskSwitch = Switch(this).apply {
-                    text = "Enable Kiosk Mode"
-                    isChecked = kioskEnabled
-                }
-                container.addView(kioskSwitch)
-
-                // ADDITIVE: Change password button inside Admin Panel
-                val changePwBtn = Button(this).apply {
-                    text = "Change Admin Password"
-                }
-                container.addView(changePwBtn)
-
-                val infoText = TextView(this).apply {
-                    setTextColor(Color.parseColor("#AAAAAA"))
-                    textSize = 12f
-                    text = if (PasswordStore.hasPassword(this@MainActivity))
-                        "Password is stored securely on-device." else
-                        "Using legacy PIN. Set an admin password to upgrade security."
-                    setPadding(0, dpToPx(8), 0, 0)
-                }
-                container.addView(infoText)
-
-                val adminDialog = AlertDialog.Builder(this)
-                    .setTitle("Admin Panel")
-                    .setView(container)
-                    .setPositiveButton("Apply") { _, _ ->
-                        val wantKiosk = kioskSwitch.isChecked
-                        if (wantKiosk && !kioskEnabled) {
-                            if (enableKioskModeIfPermitted()) {
-                                kioskEnabled = true
-                                Toast.makeText(this, "Kiosk enabled", Toast.LENGTH_SHORT).show()
-                            }
-                        } else if (!wantKiosk && kioskEnabled) {
+        // Authenticate first (dialog doesn't auto-dismiss on wrong input)
+        showPinDialog {
+            // After successful auth: simple actions (no kiosk toggle)
+            val options = arrayOf("Exit Kiosk Mode", "Change Admin Password")
+            AlertDialog.Builder(this)
+                .setTitle("Admin Panel")
+                .setItems(options) { _, which ->
+                    when (which) {
+                        0 -> {
                             disableKioskModeIfActive()
-                            kioskEnabled = false
                             Toast.makeText(this, "Kiosk disabled", Toast.LENGTH_SHORT).show()
                         }
+                        1 -> showChangePasswordDialog()
                     }
-                    .setNegativeButton("Close", null)
-                    .create()
-
-                changePwBtn.setOnClickListener {
-                    showChangePasswordDialog()
                 }
-
-                adminDialog.show()
-            }
-            .setNegativeButton("Cancel", null)
-            .show()
+                .setNegativeButton("Close", null)
+                .show()
+        }
     }
 
-    // ADDITIVE: In-launcher Change Password dialog (local-only)
+    // In-launcher Change Password dialog (local-only)
     private fun showChangePasswordDialog() {
         val scroll = ScrollView(this)
         val container = LinearLayout(this).apply {
@@ -410,7 +334,6 @@ class MainActivity : AppCompatActivity() {
             .create()
 
         dialog.setOnShowListener {
-            // Ensure keyboard does not cover inputs
             dialog.window?.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)
             val saveBtn = dialog.getButton(AlertDialog.BUTTON_POSITIVE)
             saveBtn.setOnClickListener {
@@ -434,7 +357,7 @@ class MainActivity : AppCompatActivity() {
                     error.text = "Passwords don’t match."
                     return@setOnClickListener
                 }
-                if (newPw.length < 6) {
+                if (!PasswordPolicy.strongEnough(newPw)) {
                     error.visibility = View.VISIBLE
                     error.text = "Password too weak (min 6 chars)."
                     return@setOnClickListener
@@ -448,7 +371,6 @@ class MainActivity : AppCompatActivity() {
 
         dialog.show()
     }
-
 
     private fun spaceView(dp: Int): View = View(this).apply {
         layoutParams = LinearLayout.LayoutParams(
@@ -987,10 +909,10 @@ class MainActivity : AppCompatActivity() {
         container.addView(error)
 
         val dialog = AlertDialog.Builder(this)
-            .setTitle("Parental Control")
-            .setMessage(if (PasswordStore.hasPassword(this)) "Enter password to access Settings" else "Enter PIN to access Settings")
+            .setTitle("Admin Access")
+            .setMessage(if (PasswordStore.hasPassword(this)) "Enter password to proceed" else "Enter PIN to proceed")
             .setView(container)
-            .setPositiveButton("OK", null)   // override later
+            .setPositiveButton("OK", null)       // we override so it won't auto-dismiss
             .setNegativeButton("Cancel", null)
             .setCancelable(false)
             .create()
@@ -1005,29 +927,27 @@ class MainActivity : AppCompatActivity() {
                 val fails = PasswordStore.failedAttempts(this)
                 val left = (PasswordStore.MAX_BEFORE_BACKOFF - fails).coerceAtLeast(0)
                 helper.text = if (left > 0) "Attempts left before lockout: $left" else ""
-                error.visibility = View.GONE
+                if (error.text?.startsWith("Locked") != true) error.visibility = View.GONE
             }
         }
 
         var ticker: Runnable? = null
         dialog.setOnShowListener {
-            val okBtn = dialog.getButton(AlertDialog.BUTTON_POSITIVE)
+            dialog.window?.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)
 
-            okBtn.setOnClickListener {
-                if (PasswordStore.isLocked(this)) return@setOnClickListener  // still locked; UI already shows message
+            val ok = dialog.getButton(AlertDialog.BUTTON_POSITIVE)
+            ok.setOnClickListener {
+                if (PasswordStore.isLocked(this)) return@setOnClickListener
                 val entered = input.text.toString()
-                val ok = if (PasswordStore.hasPassword(this)) {
+                val okAuth = if (PasswordStore.hasPassword(this)) {
                     PasswordStore.verify(this, entered.toCharArray())
                 } else {
-                    val pass = entered == PARENTAL_PIN
-                    if (!pass) Toast.makeText(this, "Incorrect PIN", Toast.LENGTH_SHORT).show()
-                    pass
+                    entered == PARENTAL_PIN
                 }
-                if (ok) {
+                if (okAuth) {
                     dialog.dismiss()
                     onSuccess()
                 } else {
-                    // keep dialog open; show inline error and update helper/lock state
                     error.visibility = View.VISIBLE
                     error.text = "Wrong password. Try again."
                     refreshState()
@@ -1036,7 +956,7 @@ class MainActivity : AppCompatActivity() {
 
             refreshState()
 
-            // Live countdown while locked
+            // live countdown while locked
             ticker = object : Runnable {
                 override fun run() {
                     if (PasswordStore.isLocked(this@MainActivity)) {
@@ -1044,27 +964,21 @@ class MainActivity : AppCompatActivity() {
                         error.visibility = View.VISIBLE
                         error.text = "Locked. Try again in ${sec}s."
                         input.isEnabled = false
-                        input.text = null
                         handler.postDelayed(this, 500)
                     } else {
-                        if (error.text?.startsWith("Locked.") == true) {
-                            error.visibility = View.GONE
-                            input.isEnabled = true
-                            refreshState()
-                        }
+                        if (error.text?.startsWith("Locked.") == true) error.visibility = View.GONE
+                        input.isEnabled = true
+                        refreshState()
                         handler.removeCallbacks(this)
                     }
                 }
-            }.also { handler.post(it) }
+            }
+            handler.post(ticker!!)
         }
-
-        dialog.setOnDismissListener {
-            ticker?.let { handler.removeCallbacks(it) }
-        }
+        dialog.setOnDismissListener { ticker?.let { handler.removeCallbacks(it) } }
 
         dialog.show()
     }
-
 
     private fun slideUpDrawer() {
         if (!isFinishing && !isDestroyed) {
@@ -1378,7 +1292,7 @@ class MainActivity : AppCompatActivity() {
 
     override fun onStop() {
         super.onStop()
-        // If kiosk enabled and active, bounce back to HOME
+        // If lock-task active, bounce back to HOME
         val am = getSystemService(android.app.ActivityManager::class.java)
         val inLockTask = am.lockTaskModeState != android.app.ActivityManager.LOCK_TASK_MODE_NONE
         if (inLockTask) {
