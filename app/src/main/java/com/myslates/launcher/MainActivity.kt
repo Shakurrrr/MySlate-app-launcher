@@ -31,6 +31,8 @@ import javax.crypto.SecretKeyFactory
 import javax.crypto.spec.PBEKeySpec
 import kotlin.math.min
 import kotlin.random.Random
+import com.myslates.launcher.security.PasswordStore
+
 
 
 private object PasswordStore {
@@ -363,10 +365,12 @@ class MainActivity : AppCompatActivity() {
 
     // ADDITIVE: In-launcher Change Password dialog (local-only)
     private fun showChangePasswordDialog() {
+        val scroll = ScrollView(this)
         val container = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(dpToPx(16), dpToPx(8), dpToPx(16), dpToPx(8))
         }
+        scroll.addView(container)
 
         val currentInput = EditText(this).apply {
             inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD
@@ -384,39 +388,55 @@ class MainActivity : AppCompatActivity() {
             hint = "Confirm new password"
             maxLines = 1
         }
+        val error = TextView(this).apply {
+            setTextColor(ContextCompat.getColor(this@MainActivity, android.R.color.holo_red_light))
+            textSize = 12f
+            visibility = View.GONE
+        }
 
         container.addView(currentInput)
         container.addView(spaceView(8))
         container.addView(newInput)
         container.addView(spaceView(8))
         container.addView(confirmInput)
+        container.addView(spaceView(6))
+        container.addView(error)
 
         val dialog = AlertDialog.Builder(this)
             .setTitle("Change Admin Password")
-            .setView(container)
-            .setPositiveButton("Save", null) // we override to keep dialog open on validation errors
+            .setView(scroll)
+            .setPositiveButton("Save", null)
             .setNegativeButton("Cancel", null)
             .create()
 
         dialog.setOnShowListener {
+            // Ensure keyboard does not cover inputs
+            dialog.window?.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)
             val saveBtn = dialog.getButton(AlertDialog.BUTTON_POSITIVE)
             saveBtn.setOnClickListener {
-                // Basic validation
+                if (PasswordStore.isLocked(this)) {
+                    error.visibility = View.VISIBLE
+                    error.text = "Too many attempts. Try later."
+                    return@setOnClickListener
+                }
                 val hasExisting = PasswordStore.hasPassword(this)
                 val cur = currentInput.text.toString()
                 val newPw = newInput.text.toString()
                 val conf = confirmInput.text.toString()
 
-                if (hasExisting && !verifyAdminSecret(cur)) {
-                    // verifyAdminSecret already toasts; don’t dismiss
+                if (hasExisting && !PasswordStore.verify(this, cur.toCharArray())) {
+                    error.visibility = View.VISIBLE
+                    error.text = "Current password is incorrect."
                     return@setOnClickListener
                 }
                 if (newPw != conf) {
-                    Toast.makeText(this, "Passwords don’t match", Toast.LENGTH_SHORT).show()
+                    error.visibility = View.VISIBLE
+                    error.text = "Passwords don’t match."
                     return@setOnClickListener
                 }
-                if (!PasswordPolicy.strongEnough(newPw)) {
-                    Toast.makeText(this, "Password too weak (min 6 chars)", Toast.LENGTH_SHORT).show()
+                if (newPw.length < 6) {
+                    error.visibility = View.VISIBLE
+                    error.text = "Password too weak (min 6 chars)."
                     return@setOnClickListener
                 }
 
@@ -428,6 +448,7 @@ class MainActivity : AppCompatActivity() {
 
         dialog.show()
     }
+
 
     private fun spaceView(dp: Int): View = View(this).apply {
         layoutParams = LinearLayout.LayoutParams(
@@ -939,28 +960,111 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun showPinDialog(onSuccess: () -> Unit) {
-        val editText = EditText(this).apply {
+        val container = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dpToPx(16), dpToPx(8), dpToPx(16), dpToPx(4))
+        }
+
+        val input = EditText(this).apply {
             inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD
             hint = if (PasswordStore.hasPassword(this@MainActivity)) "Enter admin password" else "Enter 6-digit PIN"
             maxLines = 1
-            setPadding(dpToPx(16), dpToPx(16), dpToPx(16), dpToPx(16))
-            isEnabled = !PasswordStore.isLocked(this@MainActivity)
+        }
+        val helper = TextView(this).apply {
+            setTextColor(Color.parseColor("#AAAAAA"))
+            textSize = 12f
+        }
+        val error = TextView(this).apply {
+            setTextColor(ContextCompat.getColor(this@MainActivity, android.R.color.holo_red_light))
+            textSize = 12f
+            visibility = View.GONE
         }
 
-        AlertDialog.Builder(this)
+        container.addView(input)
+        container.addView(spaceView(6))
+        container.addView(helper)
+        container.addView(spaceView(2))
+        container.addView(error)
+
+        val dialog = AlertDialog.Builder(this)
             .setTitle("Parental Control")
             .setMessage(if (PasswordStore.hasPassword(this)) "Enter password to access Settings" else "Enter PIN to access Settings")
-            .setView(editText)
-            .setPositiveButton("OK") { _, _ ->
-                val entered = editText.text.toString()
-                val ok = verifyAdminSecret(entered)
-                if (ok) onSuccess()
-                // errors are already surfaced inside verifyAdminSecret
-            }
+            .setView(container)
+            .setPositiveButton("OK", null)   // override later
             .setNegativeButton("Cancel", null)
             .setCancelable(false)
-            .show()
+            .create()
+
+        fun refreshState() {
+            if (PasswordStore.isLocked(this)) {
+                input.isEnabled = false
+                error.visibility = View.VISIBLE
+                error.text = "Locked. Please wait…"
+            } else {
+                input.isEnabled = true
+                val fails = PasswordStore.failedAttempts(this)
+                val left = (PasswordStore.MAX_BEFORE_BACKOFF - fails).coerceAtLeast(0)
+                helper.text = if (left > 0) "Attempts left before lockout: $left" else ""
+                error.visibility = View.GONE
+            }
+        }
+
+        var ticker: Runnable? = null
+        dialog.setOnShowListener {
+            val okBtn = dialog.getButton(AlertDialog.BUTTON_POSITIVE)
+
+            okBtn.setOnClickListener {
+                if (PasswordStore.isLocked(this)) return@setOnClickListener  // still locked; UI already shows message
+                val entered = input.text.toString()
+                val ok = if (PasswordStore.hasPassword(this)) {
+                    PasswordStore.verify(this, entered.toCharArray())
+                } else {
+                    val pass = entered == PARENTAL_PIN
+                    if (!pass) Toast.makeText(this, "Incorrect PIN", Toast.LENGTH_SHORT).show()
+                    pass
+                }
+                if (ok) {
+                    dialog.dismiss()
+                    onSuccess()
+                } else {
+                    // keep dialog open; show inline error and update helper/lock state
+                    error.visibility = View.VISIBLE
+                    error.text = "Wrong password. Try again."
+                    refreshState()
+                }
+            }
+
+            refreshState()
+
+            // Live countdown while locked
+            ticker = object : Runnable {
+                override fun run() {
+                    if (PasswordStore.isLocked(this@MainActivity)) {
+                        val sec = PasswordStore.remainingLockMs(this@MainActivity) / 1000
+                        error.visibility = View.VISIBLE
+                        error.text = "Locked. Try again in ${sec}s."
+                        input.isEnabled = false
+                        input.text = null
+                        handler.postDelayed(this, 500)
+                    } else {
+                        if (error.text?.startsWith("Locked.") == true) {
+                            error.visibility = View.GONE
+                            input.isEnabled = true
+                            refreshState()
+                        }
+                        handler.removeCallbacks(this)
+                    }
+                }
+            }.also { handler.post(it) }
+        }
+
+        dialog.setOnDismissListener {
+            ticker?.let { handler.removeCallbacks(it) }
+        }
+
+        dialog.show()
     }
+
 
     private fun slideUpDrawer() {
         if (!isFinishing && !isDestroyed) {
