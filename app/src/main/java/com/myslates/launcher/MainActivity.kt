@@ -108,7 +108,7 @@ private object PasswordStore {
     private fun resetThrottle(ctx: android.content.Context) {
         prefs(ctx).edit()
             .putInt(KEY_FAILS, 0)
-            .putLong(KEY_LOCK_UNTIL, 0L)
+            .putLong(KEY_LOCK_UNTIL, 0)
             .apply()
     }
 
@@ -436,19 +436,29 @@ class MainActivity : AppCompatActivity() {
             override fun onDown(e: MotionEvent): Boolean = true
 
             override fun onFling(e1: MotionEvent?, e2: MotionEvent, velocityX: Float, velocityY: Float): Boolean {
-                if (e1 == null || isDragging || isPanelOpen) return false
+                if (e1 == null || isDragging) return false
                 val deltaX = e2.x - e1.x
                 val deltaY = e2.y - e1.y
                 return when {
                     Math.abs(deltaY) > Math.abs(deltaX) && Math.abs(velocityY) > 800 -> {
-                        if (deltaY > 0 && isDrawerOpen) { slideDownDrawer(); true }
-                        else if (deltaY < 0 && !isDrawerOpen) { slideUpDrawer(); true }
+                        if (deltaY > 0 && isDrawerOpen && !isPanelOpen) { slideDownDrawer(); true }
+                        else if (deltaY < 0 && !isDrawerOpen && !isPanelOpen) { slideUpDrawer(); true }
                         else false
                     }
                     Math.abs(deltaX) > Math.abs(deltaY) && Math.abs(velocityX) > 800 -> {
-                        if (deltaX < 0) { showRightPanel(); true }
-                        else if (deltaX > 0) { showLeftPanel(); true }
-                        else false
+                        if (isPanelOpen) {
+                            if (leftPanel.visibility == View.VISIBLE && deltaX < 0) { // Swipe left to close left panel
+                                hideLeftPanel()
+                                true
+                            } else if (rightPanel.visibility == View.VISIBLE && deltaX > 0) { // Swipe right to close right panel
+                                hideRightPanel()
+                                true
+                            } else false
+                        } else {
+                            if (deltaX < 0 && !isDrawerOpen) { showRightPanel(); true }
+                            else if (deltaX > 0 && !isDrawerOpen) { showLeftPanel(); true }
+                            else false
+                        }
                     }
                     else -> false
                 }
@@ -466,18 +476,52 @@ class MainActivity : AppCompatActivity() {
                         else false
                     }
                     Math.abs(deltaX) > Math.abs(deltaY) && Math.abs(deltaX) > minDistance -> {
-                        if (deltaX < 0 && !isDrawerOpen && !isPanelOpen) { showRightPanel(); true }
-                        else if (deltaX > 0 && !isDrawerOpen && !isPanelOpen) { showLeftPanel(); true }
-                        else false
+                        if (isPanelOpen) {
+                            if (leftPanel.visibility == View.VISIBLE && deltaX < 0) {
+                                hideLeftPanel()
+                                true
+                            } else if (rightPanel.visibility == View.VISIBLE && deltaX > 0) {
+                                hideRightPanel()
+                                true
+                            } else false
+                        } else {
+                            if (deltaX < 0 && !isDrawerOpen) { showRightPanel(); true }
+                            else if (deltaX > 0 && !isDrawerOpen) { showLeftPanel(); true }
+                            else false
+                        }
                     }
                     else -> false
                 }
             }
+
+            private fun hideRightPanel() {
+                rightPanel.animate()
+                    .translationX(rightPanel.width.toFloat())
+                    .setDuration(300)
+                    .setInterpolator(AccelerateDecelerateInterpolator())
+                    .withEndAction {
+                        rightPanel.visibility = View.GONE
+                        isPanelOpen = false
+                    }
+                    .start()
+            }
+            private fun hideLeftPanel() {
+                leftPanel.animate()
+                    .translationX(-leftPanel.width.toFloat())
+                    .setDuration(300)
+                    .setInterpolator(AccelerateDecelerateInterpolator())
+                    .withEndAction {
+                        leftPanel.visibility = View.GONE
+                        isPanelOpen = false
+                    }
+                    .start()
+            }
         })
 
+        // 🔧 Always feed events to the detector; when a panel is open, consume to avoid underlying taps.
         val gestureListener = View.OnTouchListener { _, event ->
-            if (!isDragging && !isPanelOpen) gestureDetector.onTouchEvent(event)
-            false
+            gestureDetector.onTouchEvent(event)
+            isPanelOpen
         }
 
         rootLayout.setOnTouchListener(gestureListener)
@@ -485,6 +529,15 @@ class MainActivity : AppCompatActivity() {
         timeText.setOnTouchListener(gestureListener)
         dateText.setOnTouchListener(gestureListener)
         weatherText.setOnTouchListener(gestureListener)
+
+        // 🔧 Critical: panels must also forward their events while visible
+        leftPanel.isClickable = true
+        leftPanel.isFocusable = true
+        leftPanel.setOnTouchListener(gestureListener)
+
+        rightPanel.isClickable = true
+        rightPanel.isFocusable = true
+        rightPanel.setOnTouchListener(gestureListener)
     }
 
     // ---------- HOME GRID ----------
@@ -1008,9 +1061,11 @@ class MainActivity : AppCompatActivity() {
         isPanelOpen = true
         setupCalendarPanel()
         leftPanel.visibility = View.VISIBLE
-        leftPanel.translationX = -leftPanel.width.toFloat()
-        leftPanel.animate().translationX(0f).setDuration(300)
-            .setInterpolator(AccelerateDecelerateInterpolator()).start()
+        leftPanel.post {
+            leftPanel.translationX = -leftPanel.width.toFloat()
+            leftPanel.animate().translationX(0f).setDuration(300)
+                .setInterpolator(AccelerateDecelerateInterpolator()).start()
+        }
         leftPanel.setOnClickListener { hidePanels() }
     }
 
@@ -1019,9 +1074,11 @@ class MainActivity : AppCompatActivity() {
         isPanelOpen = true
         setupInterestingPanel()
         rightPanel.visibility = View.VISIBLE
-        rightPanel.translationX = rightPanel.width.toFloat()
-        rightPanel.animate().translationX(0f).setDuration(300)
-            .setInterpolator(AccelerateDecelerateInterpolator()).start()
+        rightPanel.post {
+            rightPanel.translationX = rightPanel.width.toFloat()
+            rightPanel.animate().translationX(0f).setDuration(300)
+                .setInterpolator(AccelerateDecelerateInterpolator()).start()
+        }
         rightPanel.setOnClickListener { hidePanels() }
     }
 
