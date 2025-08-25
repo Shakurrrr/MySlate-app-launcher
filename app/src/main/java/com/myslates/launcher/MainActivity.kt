@@ -207,9 +207,9 @@ class MainActivity : AppCompatActivity() {
         setupSwipeGestures()
 
         // 🔒 Immediately enter kiosk mode when launcher starts (no Device Owner required)
-        if (!isLockTaskModeRunning()) {
-            enableKioskModeIfPermitted()
-        }
+       // if (!isLockTaskModeRunning()) {
+           // enableKioskModeIfPermitted()
+        //}
 
         // Long-press clock → Admin panel (PIN/Password → exit kiosk or change password)
         timeText.setOnLongClickListener { showAdminPanel(); true }
@@ -225,16 +225,16 @@ class MainActivity : AppCompatActivity() {
 
     // ---------- KIOSK (Lock Task) ----------
 
-    private fun enableKioskModeIfPermitted(): Boolean {
-        return try {
-            startLockTask() // no device-owner requirement; user will be pinned to this task
-            true
-        } catch (e: Exception) {
-            Log.e("Security", "Failed enabling kiosk", e)
-            Toast.makeText(this, "Kiosk unavailable on this device", Toast.LENGTH_LONG).show()
-            false
-        }
-    }
+   // private fun enableKioskModeIfPermitted(): Boolean {
+       // return try {
+           // startLockTask() // no device-owner requirement; user will be pinned to this task
+            //true
+        //} catch (e: Exception) {
+            //Log.e("Security", "Failed enabling kiosk", e)
+            //Toast.makeText(this, "Kiosk unavailable on this device", Toast.LENGTH_LONG).show()
+            //false
+        //}
+    //}
 
     private fun isLockTaskModeRunning(): Boolean {
         val activityManager = getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
