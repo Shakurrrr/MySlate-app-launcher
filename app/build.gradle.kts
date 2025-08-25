@@ -12,6 +12,23 @@ repositories {
 }
 
 android {
+    // … your existing config
+
+    // For App Bundles (.aab): disable Play splits
+    bundle {
+        abi { enableSplit = false }
+        density { enableSplit = false }
+        language { enableSplit = false }   // <-- language belongs ONLY here
+    }
+
+    // For APK builds: disable local splits
+    splits {
+        abi { isEnable = false }
+        density { isEnable = false }
+    }
+}
+
+android {
     namespace = "com.myslates.launcher"
     compileSdk = 35
 

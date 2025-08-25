@@ -31,6 +31,11 @@ import javax.crypto.SecretKeyFactory
 import javax.crypto.spec.PBEKeySpec
 import kotlin.math.min
 import kotlin.random.Random
+import android.content.res.ColorStateList
+import android.widget.LinearLayout
+import com.google.android.material.button.MaterialButton
+import com.google.android.material.shape.CornerFamily
+import com.google.android.material.shape.ShapeAppearanceModel
 
 // NOTE: Using the in-file PasswordStore (no import of com.myslates.launcher.security.PasswordStore)
 
@@ -154,6 +159,8 @@ class MainActivity : AppCompatActivity() {
     private var currentPage = 0
     private val maxAppsPerPage = 6 // 2x3 grid
     private val homeScreenApps = mutableListOf<AppObject?>()
+    // month currently rendered in the left panel
+    private var calMonth: Calendar = Calendar.getInstance()
 
     // Fast duplicate check (kept in lockstep with homeScreenApps)
     private val homePackages = mutableSetOf<String>()
@@ -175,6 +182,12 @@ class MainActivity : AppCompatActivity() {
     private val LABEL_SP       get() = if (isTablet) 20f else 16f
     private val TIME_SP        get() = if (isTablet) 96f else 72f
     private val DATE_SP        get() = if (isTablet) 28f else 20f
+
+    // Calendar/events state
+    private val CAL_STORE = "calendar_events_store"
+    private val CAL_EVENTS_KEY = "events_json"
+    // yyyy-MM-dd -> list of event titles
+    private val eventsByDay: MutableMap<String, MutableList<String>> = mutableMapOf()
 
     private val allowedApps = listOf(
         "com.ATS.MySlates",
@@ -539,6 +552,308 @@ class MainActivity : AppCompatActivity() {
         rightPanel.isFocusable = true
         rightPanel.setOnTouchListener(gestureListener)
     }
+
+
+    //-------  CALENDAR  RESPONSIVENESS ------
+
+    private fun calKey(year: Int, month0: Int, day: Int): String =
+        String.format(Locale.US, "%04d-%02d-%02d", year, month0 + 1, day)
+
+    private fun calKey(cal: Calendar): String =
+        calKey(cal.get(Calendar.YEAR), cal.get(Calendar.MONTH), cal.get(Calendar.DAY_OF_MONTH))
+
+    private fun loadEventsFromPrefs() {
+        eventsByDay.clear()
+        val raw = getSharedPreferences(CAL_STORE, MODE_PRIVATE).getString(CAL_EVENTS_KEY, null) ?: return
+        try {
+            val json = org.json.JSONObject(raw)
+            for (key in json.keys()) {
+                val arr = json.getJSONArray(key)
+                val list = mutableListOf<String>()
+                for (i in 0 until arr.length()) list.add(arr.getString(i))
+                eventsByDay[key] = list
+            }
+        } catch (_: Exception) { /* ignore bad data */ }
+    }
+
+    private fun saveEventsToPrefs() {
+        val root = org.json.JSONObject()
+        eventsByDay.forEach { (k, v) ->
+            root.put(k, org.json.JSONArray(v))
+        }
+        getSharedPreferences(CAL_STORE, MODE_PRIVATE).edit()
+            .putString(CAL_EVENTS_KEY, root.toString())
+            .apply()
+    }
+
+
+
+    //---------- EVENT DIALOG-----
+
+    private fun showDayEventsDialog(year: Int, month0: Int, day: Int) {
+        val key = calKey(year, month0, day)
+        val items = eventsByDay.getOrPut(key) { mutableListOf() }
+
+        // ---- dialog content root ----
+        val root = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dpToPx(16), dpToPx(8), dpToPx(16), dpToPx(8))
+        }
+
+        val titleView = TextView(this).apply {
+            text = SimpleDateFormat("EEE, MMM d yyyy", Locale.getDefault())
+                .format(GregorianCalendar(year, month0, day).time)
+            textSize = 18f
+            setTextColor(Color.WHITE)
+            setPadding(0, 0, 0, dpToPx(8))
+        }
+        root.addView(titleView)
+
+        // --- input row (add) ---
+        val inputRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        val input = EditText(this).apply {
+            hint = "Add event"
+            setSingleLine()
+            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+        }
+        val addBtn = ImageButton(this).apply {
+            setImageResource(android.R.drawable.ic_input_add)
+            background = null
+            setColorFilter(Color.WHITE)
+            setOnClickListener {
+                val text = input.text.toString().trim()
+                if (text.isEmpty()) return@setOnClickListener
+                items.add(text)
+                eventsAdapter?.notifyItemInserted(items.lastIndex)
+                input.setText("")
+                saveEventsAndRefresh()
+            }
+        }
+        inputRow.addView(input)
+        inputRow.addView(addBtn)
+        root.addView(inputRow)
+
+        // --- multi select toolbar ---
+        val toolbar = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.END
+            setPadding(0, dpToPx(6), 0, dpToPx(6))
+        }
+        val deleteSelectedBtn = MaterialButtonSmall("Delete selected").apply {
+            isEnabled = false
+            setOnClickListener {
+                val adapter = eventsAdapter ?: return@setOnClickListener
+                val toDelete = adapter.selectedPositions().sortedDescending()
+                toDelete.forEach { pos -> items.removeAt(pos) }
+                adapter.clearSelection()
+                adapter.notifyDataSetChanged()
+                isEnabled = false
+                saveEventsAndRefresh()
+            }
+        }
+        val clearDayBtn = MaterialButtonSmall("Clear day").apply {
+            setOnClickListener {
+                if (items.isEmpty()) return@setOnClickListener
+                AlertDialog.Builder(this@MainActivity)
+                    .setMessage("Delete all events for this day?")
+                    .setPositiveButton("Delete") { _, _ ->
+                        items.clear()
+                        eventsAdapter?.notifyDataSetChanged()
+                        saveEventsAndRefresh()
+                    }
+                    .setNegativeButton("Cancel", null)
+                    .show()
+            }
+        }
+        toolbar.addView(deleteSelectedBtn)
+        toolbar.addView(spaceView(8))
+        toolbar.addView(clearDayBtn)
+        root.addView(toolbar)
+
+        // --- recycler list ---
+        val rv = RecyclerView(this).apply {
+            layoutManager = androidx.recyclerview.widget.LinearLayoutManager(this@MainActivity)
+            adapter = EventsAdapter(items,
+                onSelectionChanged = { anySel -> deleteSelectedBtn.isEnabled = anySel },
+                onEdit = { position, oldText ->
+                    showEditEventDialog(oldText) { newText ->
+                        items[position] = newText
+                        eventsAdapter?.notifyItemChanged(position)
+                        saveEventsAndRefresh()
+                    }
+                }
+            ).also { eventsAdapter = it }
+            addItemDecoration(androidx.recyclerview.widget.DividerItemDecoration(
+                context, androidx.recyclerview.widget.DividerItemDecoration.VERTICAL))
+        }
+        root.addView(rv, LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT, dpToPx(260)
+        ))
+
+        // swipe to delete with Undo
+        val ith = object : androidx.recyclerview.widget.ItemTouchHelper.SimpleCallback(0,
+            androidx.recyclerview.widget.ItemTouchHelper.LEFT or androidx.recyclerview.widget.ItemTouchHelper.RIGHT) {
+
+            override fun onMove(rv: RecyclerView, vh: RecyclerView.ViewHolder, tgt: RecyclerView.ViewHolder) = false
+
+            override fun onSwiped(vh: RecyclerView.ViewHolder, dir: Int) {
+                val pos = vh.bindingAdapterPosition
+                if (pos in items.indices) {
+                    val removed = items.removeAt(pos)
+                    eventsAdapter?.notifyItemRemoved(pos)
+                    com.google.android.material.snackbar.Snackbar
+                        .make(root, "Deleted", com.google.android.material.snackbar.Snackbar.LENGTH_LONG)
+                        .setAction("UNDO") {
+                            val p = (pos).coerceIn(0, items.size)
+                            items.add(p, removed)
+                            eventsAdapter?.notifyItemInserted(p)
+                            saveEventsAndRefresh(skipRefresh = true)
+                        }
+                        .addCallback(object: com.google.android.material.snackbar.BaseTransientBottomBar.BaseCallback<com.google.android.material.snackbar.Snackbar>() {
+                            override fun onDismissed(transientBottomBar: com.google.android.material.snackbar.Snackbar?, event: Int) {
+                                if (event != com.google.android.material.snackbar.BaseTransientBottomBar.BaseCallback.DISMISS_EVENT_ACTION) {
+                                    saveEventsAndRefresh()
+                                }
+                            }
+                        })
+                        .show()
+                }
+            }
+        }
+        androidx.recyclerview.widget.ItemTouchHelper(ith).attachToRecyclerView(rv)
+
+        // final dialog
+        AlertDialog.Builder(this)
+            .setTitle("Events")
+            .setView(root)
+            .setNegativeButton("Close", null)
+            .show()
+    }
+
+    private var eventsAdapter: EventsAdapter? = null
+
+    private fun saveEventsAndRefresh(skipRefresh: Boolean = false) {
+        saveEventsToPrefs()
+        if (!skipRefresh) setupCalendarPanel()  // refresh dots on calendar
+    }
+
+    private fun MaterialButtonSmall(textLabel: String): MaterialButton {
+        return MaterialButton(this).apply {
+            text = textLabel
+
+            // Size & spacing (use padding/margins instead of inset*)
+            minimumHeight = dpToPx(40)
+            setPadding(dpToPx(12), dpToPx(8), dpToPx(12), dpToPx(8))
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            ).apply { setMargins(0, 0, dpToPx(8), 0) }
+
+            // Rounded shape (Material3-safe)
+            shapeAppearanceModel = ShapeAppearanceModel.Builder()
+                .setAllCorners(CornerFamily.ROUNDED, dpToPx(12).toFloat())
+                .build()
+
+            // Colors
+            setTextColor(Color.WHITE)
+            rippleColor = ColorStateList.valueOf(Color.parseColor("#33FFFFFF"))
+            backgroundTintList = ColorStateList.valueOf(Color.parseColor("#22444444"))
+
+        }
+    }
+
+    private inner class EventsAdapter(
+        private val data: MutableList<String>,
+        private val onSelectionChanged: (hasSelection: Boolean) -> Unit,
+        private val onEdit: (position: Int, oldText: String) -> Unit
+    ) : RecyclerView.Adapter<EventsAdapter.VH>() {
+
+        private val selected = mutableSetOf<Int>()
+
+        inner class VH(val row: LinearLayout) : RecyclerView.ViewHolder(row) {
+            val check: CheckBox = row.findViewById(1)
+            val text: TextView = row.findViewById(2)
+            val editBtn: ImageButton = row.findViewById(3)
+        }
+
+        override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): VH {
+            val row = LinearLayout(parent.context).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                setPadding(dpToPx(8), dpToPx(4), dpToPx(8), dpToPx(4))
+            }
+            val check = CheckBox(parent.context).apply { id = 1 }
+            val text = TextView(parent.context).apply {
+                id = 2
+                layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+                setTextColor(Color.WHITE)
+                textSize = 16f
+                setPadding(dpToPx(8), 0, dpToPx(8), 0)
+            }
+            val edit = ImageButton(parent.context).apply {
+                id = 3
+                setImageResource(android.R.drawable.ic_menu_edit)
+                background = null
+                setColorFilter(Color.WHITE)
+            }
+            row.addView(check)
+            row.addView(text)
+            row.addView(edit)
+            return VH(row)
+        }
+
+        override fun onBindViewHolder(holder: VH, position: Int) {
+            val t = data[position]
+            holder.text.text = t
+            holder.check.isChecked = selected.contains(position)
+
+            holder.check.setOnCheckedChangeListener(null)
+            holder.check.isChecked = selected.contains(position)
+            holder.check.setOnCheckedChangeListener { _, isChecked ->
+                if (isChecked) selected.add(position) else selected.remove(position)
+                onSelectionChanged(selected.isNotEmpty())
+            }
+
+            holder.editBtn.setOnClickListener { onEdit(position, t) }
+
+            holder.row.setOnClickListener {
+                // toggle selection quickly if user taps row
+                if (selected.contains(position)) selected.remove(position) else selected.add(position)
+                notifyItemChanged(position)
+                onSelectionChanged(selected.isNotEmpty())
+            }
+        }
+
+        override fun getItemCount(): Int = data.size
+
+        fun selectedPositions(): List<Int> = selected.toList()
+
+        fun clearSelection() {
+            selected.clear()
+            onSelectionChanged(false)
+        }
+    }
+
+    private fun showEditEventDialog(old: String, onSave: (String) -> Unit) {
+        val input = EditText(this).apply {
+            setText(old)
+            setSelection(old.length)
+            setSingleLine()
+        }
+        AlertDialog.Builder(this)
+            .setTitle("Edit event")
+            .setView(input)
+            .setPositiveButton("Save") { _, _ ->
+                val t = input.text.toString().trim()
+                if (t.isNotEmpty()) onSave(t)
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
 
     // ---------- HOME GRID ----------
 
@@ -1113,109 +1428,182 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun setupCalendarPanel() {
+        // ensure events are in memory
+        if (eventsByDay.isEmpty()) loadEventsFromPrefs()
+
         val scrollView = leftPanel as ScrollView
         val container = scrollView.getChildAt(0) as? LinearLayout ?: LinearLayout(this).also {
             it.orientation = LinearLayout.VERTICAL
+            it.setPadding(dpToPx(16), dpToPx(24), dpToPx(16), dpToPx(24))
             scrollView.addView(it)
         }
         container.removeAllViews()
 
-        val headerText = TextView(this).apply {
-            text = "Calendar"
-            textSize = 28f
+        // Header
+        val headerRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        val titleView = TextView(this).apply {
+            textSize = 24f
             setTextColor(Color.WHITE)
             typeface = android.graphics.Typeface.DEFAULT_BOLD
-            setPadding(0, 0, 0, dpToPx(24))
+            text = SimpleDateFormat("MMMM yyyy", Locale.getDefault()).format(calMonth.time)
+            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
         }
-        container.addView(headerText)
-
-        val calendar = Calendar.getInstance()
-        val monthFormat = SimpleDateFormat("MMMM yyyy", Locale.getDefault())
-        val monthText = TextView(this).apply {
-            text = monthFormat.format(calendar.time)
-            textSize = 20f
-            setTextColor(Color.parseColor("#CCCCCC"))
-            setPadding(0, 0, 0, dpToPx(16))
+        val prevBtn = ImageButton(this).apply {
+            setImageResource(android.R.drawable.ic_media_previous)
+            background = null
+            setColorFilter(Color.WHITE)
+            setOnClickListener {
+                calMonth.add(Calendar.MONTH, -1)
+                setupCalendarPanel()
+            }
         }
-        container.addView(monthText)
+        val nextBtn = ImageButton(this).apply {
+            setImageResource(android.R.drawable.ic_media_next)
+            background = null
+            setColorFilter(Color.WHITE)
+            setOnClickListener {
+                calMonth.add(Calendar.MONTH, 1)
+                setupCalendarPanel()
+            }
+        }
+        headerRow.addView(titleView)
+        headerRow.addView(prevBtn)
+        headerRow.addView(nextBtn)
+        container.addView(headerRow)
 
-        val calendarGrid = GridLayout(this).apply {
+        container.addView(spaceView(12))
+
+        // Day headers + grid
+        val grid = GridLayout(this).apply {
             columnCount = 7
-            rowCount = 7
-            setPadding(0, 0, 0, dpToPx(24))
         }
 
-        val dayHeaders = arrayOf("S", "M", "T", "W", "T", "F", "S")
-        dayHeaders.forEach { day ->
-            val dayView = TextView(this).apply {
-                text = day
-                textSize = 14f
-                setTextColor(Color.parseColor("#888888"))
-                gravity = Gravity.CENTER
-                layoutParams = GridLayout.LayoutParams().apply {
-                    width = dpToPx(40); height = dpToPx(40); setMargins(2, 2, 2, 2)
+        // Compute responsive cell width
+        grid.post {
+            val totalW = grid.width.takeIf { it > 0 }
+                ?: (resources.displayMetrics.widthPixels - dpToPx(32)) // fallback
+            val cell = (totalW / 7f).toInt()
+
+            fun dayCell(text: String, bold: Boolean = false, tint: Int? = null): LinearLayout {
+                val wrap = LinearLayout(this).apply {
+                    orientation = LinearLayout.VERTICAL
+                    gravity = Gravity.CENTER
+                    layoutParams = GridLayout.LayoutParams().apply {
+                        width = cell
+                        height = cell
+                    }
                 }
-            }
-            calendarGrid.addView(dayView)
-        }
-
-        val firstDay = calendar.clone() as Calendar
-        firstDay.set(Calendar.DAY_OF_MONTH, 1)
-        val startDay = firstDay.get(Calendar.DAY_OF_WEEK) - 1
-        val daysInMonth = calendar.getActualMaximum(Calendar.DAY_OF_MONTH)
-        val today = calendar.get(Calendar.DAY_OF_MONTH)
-
-        repeat(startDay) {
-            val emptyView = View(this).apply {
-                layoutParams = GridLayout.LayoutParams().apply { width = dpToPx(40); height = dpToPx(40) }
-            }
-            calendarGrid.addView(emptyView)
-        }
-
-        for (day in 1..daysInMonth) {
-            val dayView = TextView(this).apply {
-                text = day.toString()
-                textSize = 14f
-                gravity = Gravity.CENTER
-                layoutParams = GridLayout.LayoutParams().apply {
-                    width = dpToPx(40); height = dpToPx(40); setMargins(2, 2, 2, 2)
+                val tv = TextView(this).apply {
+                    this.text = text
+                    textSize = 14f
+                    gravity = Gravity.CENTER
+                    setTextColor(tint ?: Color.parseColor("#CCCCCC"))
+                    if (bold) typeface = android.graphics.Typeface.DEFAULT_BOLD
                 }
-                if (day == today) {
-                    setTextColor(Color.WHITE)
-                    setBackgroundResource(R.drawable.modern_icon_bg)
-                    background.setTint(Color.parseColor("#2196F3"))
-                } else {
-                    setTextColor(Color.parseColor("#CCCCCC"))
-                }
+                wrap.addView(tv)
+                return wrap
             }
-            calendarGrid.addView(dayView)
+
+            // Day headers
+            listOf("S","M","T","W","T","F","S").forEach {
+                grid.addView(dayCell(it, bold = true, tint = Color.parseColor("#AAAAAA")))
+            }
+
+            // month math
+            val cal = (calMonth.clone() as Calendar).apply { set(Calendar.DAY_OF_MONTH, 1) }
+            val leading = (cal.get(Calendar.DAY_OF_WEEK) - 1) // 0..6, Sunday start
+            val daysInMonth = cal.getActualMaximum(Calendar.DAY_OF_MONTH)
+
+            repeat(leading) { grid.addView(dayCell("")) }
+
+            val todayCal = Calendar.getInstance()
+            val isThisMonth = todayCal.get(Calendar.YEAR) == calMonth.get(Calendar.YEAR) &&
+                    todayCal.get(Calendar.MONTH) == calMonth.get(Calendar.MONTH)
+
+            for (day in 1..daysInMonth) {
+                val y = calMonth.get(Calendar.YEAR)
+                val m0 = calMonth.get(Calendar.MONTH)
+                val key = calKey(y, m0, day)
+                val hasEvents = eventsByDay[key]?.isNotEmpty() == true
+                val isToday = isThisMonth && (todayCal.get(Calendar.DAY_OF_MONTH) == day)
+
+                val cellView = dayCell(day.toString(), bold = isToday, tint = if (isToday) Color.WHITE else null)
+
+                // badge/dot for events
+                if (hasEvents) {
+                    val dot = View(this).apply {
+                        layoutParams = LinearLayout.LayoutParams(dpToPx(6), dpToPx(6)).apply {
+                            topMargin = dpToPx(4)
+                        }
+                        background = ContextCompat.getDrawable(this@MainActivity, R.drawable.modern_icon_bg)
+                        background.setTint(Color.parseColor("#4CAF50"))
+                    }
+                    (cellView as ViewGroup).addView(dot)
+                }
+
+                // click -> open event dialog
+                cellView.setOnClickListener { showDayEventsDialog(y, m0, day) }
+
+                // highlight today background
+                if (isToday) {
+                    cellView.background = ContextCompat.getDrawable(this@MainActivity, R.drawable.modern_icon_bg)
+                    cellView.background.setTint(Color.parseColor("#2196F3"))
+                }
+
+                grid.addView(cellView)
+            }
         }
 
-        container.addView(calendarGrid)
+        container.addView(grid)
 
-        val eventsHeader = TextView(this).apply {
+        container.addView(spaceView(16))
+
+        // Simple upcoming list (next 5)
+        val upcoming = nextEvents(5)
+        val upTitle = TextView(this).apply {
             text = "Upcoming Events"
-            textSize = 20f
+            textSize = 18f
             setTextColor(Color.WHITE)
             typeface = android.graphics.Typeface.DEFAULT_BOLD
-            setPadding(0, dpToPx(16), 0, dpToPx(16))
+            setPadding(0, 0, 0, dpToPx(8))
         }
-        container.addView(eventsHeader)
+        container.addView(upTitle)
 
-        listOf(
-            "Meeting at 2:00 PM",
-            "Lunch with team at 12:30 PM",
-            "Project deadline tomorrow"
-        ).forEach { event ->
-            val eventView = TextView(this).apply {
-                text = "• $event"
-                textSize = 16f
+        if (upcoming.isEmpty()) {
+            val empty = TextView(this).apply {
+                text = "No upcoming events"
                 setTextColor(Color.parseColor("#AAAAAA"))
-                setPadding(0, dpToPx(8), 0, dpToPx(8))
             }
-            container.addView(eventView)
+            container.addView(empty)
+        } else {
+            upcoming.forEach { (date, title) ->
+                val row = TextView(this).apply {
+                    text = "• $date  –  $title"
+                    setTextColor(Color.parseColor("#CCCCCC"))
+                    setPadding(0, dpToPx(4), 0, dpToPx(4))
+                }
+                container.addView(row)
+            }
         }
     }
+
+
+    //------- HELPER TO COMPUTE EVENTS ------
+
+    private fun nextEvents(limit: Int): List<Pair<String, String>> {
+        val sdfIn = SimpleDateFormat("yyyy-MM-dd", Locale.US)
+        val sdfOut = SimpleDateFormat("EEE, MMM d", Locale.getDefault())
+        val items = mutableListOf<Pair<String, String>>()
+        eventsByDay.forEach { (k, list) ->
+            val date = try { sdfIn.parse(k) } catch (_: Exception) { null } ?: return@forEach
+            list.forEach { items += sdfOut.format(date) to it }
+        }
+        return items.sortedBy { it.first }.take(limit)
+    }
+
 
     private fun setupInterestingPanel() {
         val scrollView = rightPanel as ScrollView
