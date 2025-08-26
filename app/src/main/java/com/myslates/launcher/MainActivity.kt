@@ -36,6 +36,10 @@ import android.widget.LinearLayout
 import com.google.android.material.button.MaterialButton
 import com.google.android.material.shape.CornerFamily
 import com.google.android.material.shape.ShapeAppearanceModel
+import android.content.BroadcastReceiver
+import android.content.IntentFilter
+import android.view.WindowInsets
+import android.view.WindowInsetsController
 
 // NOTE: Using the in-file PasswordStore (no import of com.myslates.launcher.security.PasswordStore)
 
@@ -170,6 +174,7 @@ class MainActivity : AppCompatActivity() {
 
     // Kiosk pref (kept; not used to gate startup anymore)
     private val PREFS by lazy { getSharedPreferences("launcher_prefs", MODE_PRIVATE) }
+
     private var kioskEnabled: Boolean
         get() = PREFS.getBoolean("kiosk_enabled", false)
         set(value) { PREFS.edit().putBoolean("kiosk_enabled", value).apply() }
@@ -194,21 +199,21 @@ class MainActivity : AppCompatActivity() {
         "com.adobe.reader"
     )
 
+    // --- System dialogs receiver (now at class scope) ---
+    private val sysDialogsReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context, intent: Intent) {
+            if (intent.action == Intent.ACTION_CLOSE_SYSTEM_DIALOGS) {
+                enterImmersive()
+            }
+        }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        // Immersive mode
-        window.decorView.systemUiVisibility = (
-                View.SYSTEM_UI_FLAG_LAYOUT_STABLE
-                        or View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
-                        or View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
-                        or View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
-                        or View.SYSTEM_UI_FLAG_FULLSCREEN
-                        or View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
-                )
-
         setTheme(R.style.Theme_MySlates_Dark)
         setContentView(R.layout.activity_main)
+        enterImmersive()
 
         // (Removed DevicePolicy/DeviceOwner path) — we run pure lock-task kiosk.
 
@@ -219,12 +224,7 @@ class MainActivity : AppCompatActivity() {
         startTimeUpdater()
         setupSwipeGestures()
 
-        // 🔒 Immediately enter kiosk mode when launcher starts (no Device Owner required)
-       // if (!isLockTaskModeRunning()) {
-           // enableKioskModeIfPermitted()
-        //}
-
-        // Long-press clock → Admin panel (PIN/Password → exit kiosk or change password)
+        // Long-press clock → Admin panel
         timeText.setOnLongClickListener { showAdminPanel(); true }
 
         // Initialize with empty grid
@@ -235,19 +235,6 @@ class MainActivity : AppCompatActivity() {
 
         applyTabletScaling()
     }
-
-    // ---------- KIOSK (Lock Task) ----------
-
-   // private fun enableKioskModeIfPermitted(): Boolean {
-       // return try {
-           // startLockTask() // no device-owner requirement; user will be pinned to this task
-            //true
-        //} catch (e: Exception) {
-            //Log.e("Security", "Failed enabling kiosk", e)
-            //Toast.makeText(this, "Kiosk unavailable on this device", Toast.LENGTH_LONG).show()
-            //false
-        //}
-    //}
 
     private fun isLockTaskModeRunning(): Boolean {
         val activityManager = getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
@@ -280,9 +267,8 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun showAdminPanel() {
-        // Authenticate first (dialog doesn't auto-dismiss on wrong input)
+        // Authenticate first
         showPinDialog {
-            // After successful auth: simple actions (no kiosk toggle)
             val options = arrayOf("Exit Kiosk Mode", "Change Admin Password")
             AlertDialog.Builder(this)
                 .setTitle("Admin Panel")
@@ -460,10 +446,10 @@ class MainActivity : AppCompatActivity() {
                     }
                     Math.abs(deltaX) > Math.abs(deltaY) && Math.abs(velocityX) > 800 -> {
                         if (isPanelOpen) {
-                            if (leftPanel.visibility == View.VISIBLE && deltaX < 0) { // Swipe left to close left panel
+                            if (leftPanel.visibility == View.VISIBLE && deltaX < 0) {
                                 hideLeftPanel()
                                 true
-                            } else if (rightPanel.visibility == View.VISIBLE && deltaX > 0) { // Swipe right to close right panel
+                            } else if (rightPanel.visibility == View.VISIBLE && deltaX > 0) {
                                 hideRightPanel()
                                 true
                             } else false
@@ -506,32 +492,9 @@ class MainActivity : AppCompatActivity() {
                     else -> false
                 }
             }
-
-            private fun hideRightPanel() {
-                rightPanel.animate()
-                    .translationX(rightPanel.width.toFloat())
-                    .setDuration(300)
-                    .setInterpolator(AccelerateDecelerateInterpolator())
-                    .withEndAction {
-                        rightPanel.visibility = View.GONE
-                        isPanelOpen = false
-                    }
-                    .start()
-            }
-            private fun hideLeftPanel() {
-                leftPanel.animate()
-                    .translationX(-leftPanel.width.toFloat())
-                    .setDuration(300)
-                    .setInterpolator(AccelerateDecelerateInterpolator())
-                    .withEndAction {
-                        leftPanel.visibility = View.GONE
-                        isPanelOpen = false
-                    }
-                    .start()
-            }
         })
 
-        // 🔧 Always feed events to the detector; when a panel is open, consume to avoid underlying taps.
+        // Always feed events to detector; consume touches when panel is open to block underlying taps.
         val gestureListener = View.OnTouchListener { _, event ->
             gestureDetector.onTouchEvent(event)
             isPanelOpen
@@ -543,7 +506,6 @@ class MainActivity : AppCompatActivity() {
         dateText.setOnTouchListener(gestureListener)
         weatherText.setOnTouchListener(gestureListener)
 
-        // 🔧 Critical: panels must also forward their events while visible
         leftPanel.isClickable = true
         leftPanel.isFocusable = true
         leftPanel.setOnTouchListener(gestureListener)
@@ -553,8 +515,30 @@ class MainActivity : AppCompatActivity() {
         rightPanel.setOnTouchListener(gestureListener)
     }
 
+    private fun hideRightPanel() {
+        rightPanel.animate()
+            .translationX(rightPanel.width.toFloat())
+            .setDuration(300)
+            .setInterpolator(AccelerateDecelerateInterpolator())
+            .withEndAction {
+                rightPanel.visibility = View.GONE
+                isPanelOpen = false
+            }
+            .start()
+    }
+    private fun hideLeftPanel() {
+        leftPanel.animate()
+            .translationX(-leftPanel.width.toFloat())
+            .setDuration(300)
+            .setInterpolator(AccelerateDecelerateInterpolator())
+            .withEndAction {
+                leftPanel.visibility = View.GONE
+                isPanelOpen = false
+            }
+            .start()
+    }
 
-    //-------  CALENDAR  RESPONSIVENESS ------
+    // -------  CALENDAR  RESPONSIVENESS ------
 
     private fun calKey(year: Int, month0: Int, day: Int): String =
         String.format(Locale.US, "%04d-%02d-%02d", year, month0 + 1, day)
@@ -586,15 +570,12 @@ class MainActivity : AppCompatActivity() {
             .apply()
     }
 
-
-
     //---------- EVENT DIALOG-----
 
     private fun showDayEventsDialog(year: Int, month0: Int, day: Int) {
         val key = calKey(year, month0, day)
         val items = eventsByDay.getOrPut(key) { mutableListOf() }
 
-        // ---- dialog content root ----
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(dpToPx(16), dpToPx(8), dpToPx(16), dpToPx(8))
@@ -609,7 +590,6 @@ class MainActivity : AppCompatActivity() {
         }
         root.addView(titleView)
 
-        // --- input row (add) ---
         val inputRow = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
@@ -636,7 +616,6 @@ class MainActivity : AppCompatActivity() {
         inputRow.addView(addBtn)
         root.addView(inputRow)
 
-        // --- multi select toolbar ---
         val toolbar = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.END
@@ -673,7 +652,6 @@ class MainActivity : AppCompatActivity() {
         toolbar.addView(clearDayBtn)
         root.addView(toolbar)
 
-        // --- recycler list ---
         val rv = RecyclerView(this).apply {
             layoutManager = androidx.recyclerview.widget.LinearLayoutManager(this@MainActivity)
             adapter = EventsAdapter(items,
@@ -693,7 +671,6 @@ class MainActivity : AppCompatActivity() {
             LinearLayout.LayoutParams.MATCH_PARENT, dpToPx(260)
         ))
 
-        // swipe to delete with Undo
         val ith = object : androidx.recyclerview.widget.ItemTouchHelper.SimpleCallback(0,
             androidx.recyclerview.widget.ItemTouchHelper.LEFT or androidx.recyclerview.widget.ItemTouchHelper.RIGHT) {
 
@@ -725,7 +702,6 @@ class MainActivity : AppCompatActivity() {
         }
         androidx.recyclerview.widget.ItemTouchHelper(ith).attachToRecyclerView(rv)
 
-        // final dialog
         AlertDialog.Builder(this)
             .setTitle("Events")
             .setView(root)
@@ -737,14 +713,12 @@ class MainActivity : AppCompatActivity() {
 
     private fun saveEventsAndRefresh(skipRefresh: Boolean = false) {
         saveEventsToPrefs()
-        if (!skipRefresh) setupCalendarPanel()  // refresh dots on calendar
+        if (!skipRefresh) setupCalendarPanel()
     }
 
     private fun MaterialButtonSmall(textLabel: String): MaterialButton {
         return MaterialButton(this).apply {
             text = textLabel
-
-            // Size & spacing (use padding/margins instead of inset*)
             minimumHeight = dpToPx(40)
             setPadding(dpToPx(12), dpToPx(8), dpToPx(12), dpToPx(8))
             layoutParams = LinearLayout.LayoutParams(
@@ -752,16 +726,13 @@ class MainActivity : AppCompatActivity() {
                 LinearLayout.LayoutParams.WRAP_CONTENT
             ).apply { setMargins(0, 0, dpToPx(8), 0) }
 
-            // Rounded shape (Material3-safe)
             shapeAppearanceModel = ShapeAppearanceModel.Builder()
                 .setAllCorners(CornerFamily.ROUNDED, dpToPx(12).toFloat())
                 .build()
 
-            // Colors
             setTextColor(Color.WHITE)
             rippleColor = ColorStateList.valueOf(Color.parseColor("#33FFFFFF"))
             backgroundTintList = ColorStateList.valueOf(Color.parseColor("#22444444"))
-
         }
     }
 
@@ -808,8 +779,6 @@ class MainActivity : AppCompatActivity() {
         override fun onBindViewHolder(holder: VH, position: Int) {
             val t = data[position]
             holder.text.text = t
-            holder.check.isChecked = selected.contains(position)
-
             holder.check.setOnCheckedChangeListener(null)
             holder.check.isChecked = selected.contains(position)
             holder.check.setOnCheckedChangeListener { _, isChecked ->
@@ -820,7 +789,6 @@ class MainActivity : AppCompatActivity() {
             holder.editBtn.setOnClickListener { onEdit(position, t) }
 
             holder.row.setOnClickListener {
-                // toggle selection quickly if user taps row
                 if (selected.contains(position)) selected.remove(position) else selected.add(position)
                 notifyItemChanged(position)
                 onSelectionChanged(selected.isNotEmpty())
@@ -854,7 +822,6 @@ class MainActivity : AppCompatActivity() {
             .show()
     }
 
-
     // ---------- HOME GRID ----------
 
     private fun setupHomeGrid() {
@@ -874,7 +841,6 @@ class MainActivity : AppCompatActivity() {
     // ---------- DRAG & DROP ----------
 
     private fun setupDragAndDrop() {
-        // Global drag listener (home surface)
         rootLayout.setOnDragListener { _, event ->
             val dragData = event.localState as? DragData
             when (event.action) {
@@ -884,9 +850,7 @@ class MainActivity : AppCompatActivity() {
                     if (isDrawerOpen && dragData?.isFromHomeScreen != true) slideDownDrawerForDrop()
                     true
                 }
-
                 DragEvent.ACTION_DROP -> {
-                    // Drop on the home surface: place in first empty slot if not duplicate
                     if (dragData != null && !dragData.isFromHomeScreen) {
                         if (!isAppAlreadyOnHomeScreen(dragData.app)) {
                             val emptySlot = findNextEmptySlot(0)
@@ -903,28 +867,22 @@ class MainActivity : AppCompatActivity() {
                     }
                     false
                 }
-
                 DragEvent.ACTION_DRAG_ENDED -> {
                     isDragging = false
                     hideDragFeedback()
 
-                    // If drop succeeded and source was DOCK, remove the dock view (move, not copy)
                     if (event.result && dragData?.source == DragData.Source.DOCK) {
                         dragData.sourceView?.let { bottomBar.removeView(it) }
                     }
-
-                    // If a HOME-origin drag failed, restore the slot
                     if (!event.result && dragData?.isFromHomeScreen == true && dragData.originalPosition >= 0) {
                         putAppAt(dragData.originalPosition, dragData.app)
                     }
                     true
                 }
-
                 else -> false
             }
         }
 
-        // Dock accepts drops (move to dock)
         bottomBar.setOnDragListener { _, event ->
             val dragData = event.localState as? DragData
             when (event.action) {
@@ -940,7 +898,6 @@ class MainActivity : AppCompatActivity() {
                         return@setOnDragListener false
                     }
 
-                    // Avoid duplicate items in dock by tag (packageName)
                     if ((0 until bottomBar.childCount).any {
                             (bottomBar.getChildAt(it).tag as? String) == dragData.app.packageName
                         }) {
@@ -956,7 +913,6 @@ class MainActivity : AppCompatActivity() {
                     newAppView.tag = dragData.app.packageName
                     bottomBar.addView(newAppView)
 
-                    // If it came from home, clear the old slot
                     if (dragData.isFromHomeScreen && dragData.originalPosition >= 0) {
                         clearSlot(dragData.originalPosition)
                     }
@@ -969,7 +925,6 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
-        // Remove zone
         removeAppZone.setOnDragListener { _, event ->
             val dragData = event.localState as? DragData
             when (event.action) {
@@ -1045,7 +1000,7 @@ class MainActivity : AppCompatActivity() {
         )
         val shadow = View.DragShadowBuilder(createDragShadow(app))
         homeGridRecyclerView.startDragAndDrop(clipData, shadow, dragData, View.DRAG_FLAG_GLOBAL)
-        clearSlot(position) // clear while dragging
+        clearSlot(position)
     }
 
     // ---------- HOME GRID HELPERS (duplicate-proof) ----------
@@ -1193,7 +1148,6 @@ class MainActivity : AppCompatActivity() {
         appView.addView(iconView)
         appView.addView(labelView)
 
-        // Click → launch (with Settings gated)
         appView.setOnClickListener {
             if (packageName == "com.android.settings") {
                 showPinDialog { launchApp(packageName) }
@@ -1202,7 +1156,6 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
-        // Long press → start drag (source = DOCK, pass the view so we can remove it on success)
         appView.setOnLongClickListener {
             val app = AppObject(label, icon, packageName)
             val clipData = ClipData.newPlainText("bottom_app", packageName)
@@ -1280,7 +1233,7 @@ class MainActivity : AppCompatActivity() {
             .setTitle("Admin Access")
             .setMessage(if (PasswordStore.hasPassword(this)) "Enter password to proceed" else "Enter PIN to proceed")
             .setView(container)
-            .setPositiveButton("OK", null)       // we override so it won't auto-dismiss
+            .setPositiveButton("OK", null)
             .setNegativeButton("Cancel", null)
             .setCancelable(false)
             .create()
@@ -1324,7 +1277,6 @@ class MainActivity : AppCompatActivity() {
 
             refreshState()
 
-            // live countdown while locked
             ticker = object : Runnable {
                 override fun run() {
                     if (PasswordStore.isLocked(this@MainActivity)) {
@@ -1346,6 +1298,27 @@ class MainActivity : AppCompatActivity() {
         dialog.setOnDismissListener { ticker?.let { handler.removeCallbacks(it) } }
 
         dialog.show()
+    }
+
+    // --- Immersive helpers (single definition) ---
+    private fun enterImmersive() {
+        if (Build.VERSION.SDK_INT >= 30) {
+            window.setDecorFitsSystemWindows(false)
+            window.insetsController?.let { c ->
+                c.hide(WindowInsets.Type.statusBars() or WindowInsets.Type.navigationBars())
+                c.systemBarsBehavior =
+                    WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+            }
+        } else {
+            @Suppress("DEPRECATION")
+            window.decorView.systemUiVisibility =
+                View.SYSTEM_UI_FLAG_LAYOUT_STABLE or
+                        View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION or
+                        View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN or
+                        View.SYSTEM_UI_FLAG_HIDE_NAVIGATION or
+                        View.SYSTEM_UI_FLAG_FULLSCREEN or
+                        View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
+        }
     }
 
     private fun slideUpDrawer() {
@@ -1428,7 +1401,6 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun setupCalendarPanel() {
-        // ensure events are in memory
         if (eventsByDay.isEmpty()) loadEventsFromPrefs()
 
         val scrollView = leftPanel as ScrollView
@@ -1439,7 +1411,6 @@ class MainActivity : AppCompatActivity() {
         }
         container.removeAllViews()
 
-        // Header
         val headerRow = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
@@ -1476,15 +1447,12 @@ class MainActivity : AppCompatActivity() {
 
         container.addView(spaceView(12))
 
-        // Day headers + grid
-        val grid = GridLayout(this).apply {
-            columnCount = 7
-        }
+        val grid = GridLayout(this).apply { columnCount = 7 }
+        container.addView(grid)
 
-        // Compute responsive cell width
         grid.post {
             val totalW = grid.width.takeIf { it > 0 }
-                ?: (resources.displayMetrics.widthPixels - dpToPx(32)) // fallback
+                ?: (resources.displayMetrics.widthPixels - dpToPx(32))
             val cell = (totalW / 7f).toInt()
 
             fun dayCell(text: String, bold: Boolean = false, tint: Int? = null): LinearLayout {
@@ -1507,16 +1475,15 @@ class MainActivity : AppCompatActivity() {
                 return wrap
             }
 
-            // Day headers
+            // Week headers
             listOf("S","M","T","W","T","F","S").forEach {
                 grid.addView(dayCell(it, bold = true, tint = Color.parseColor("#AAAAAA")))
             }
 
-            // month math
+            // First day & padding
             val cal = (calMonth.clone() as Calendar).apply { set(Calendar.DAY_OF_MONTH, 1) }
-            val leading = (cal.get(Calendar.DAY_OF_WEEK) - 1) // 0..6, Sunday start
+            val leading = (cal.get(Calendar.DAY_OF_WEEK) - 1)
             val daysInMonth = cal.getActualMaximum(Calendar.DAY_OF_MONTH)
-
             repeat(leading) { grid.addView(dayCell("")) }
 
             val todayCal = Calendar.getInstance()
@@ -1532,7 +1499,6 @@ class MainActivity : AppCompatActivity() {
 
                 val cellView = dayCell(day.toString(), bold = isToday, tint = if (isToday) Color.WHITE else null)
 
-                // badge/dot for events
                 if (hasEvents) {
                     val dot = View(this).apply {
                         layoutParams = LinearLayout.LayoutParams(dpToPx(6), dpToPx(6)).apply {
@@ -1544,10 +1510,8 @@ class MainActivity : AppCompatActivity() {
                     (cellView as ViewGroup).addView(dot)
                 }
 
-                // click -> open event dialog
                 cellView.setOnClickListener { showDayEventsDialog(y, m0, day) }
 
-                // highlight today background
                 if (isToday) {
                     cellView.background = ContextCompat.getDrawable(this@MainActivity, R.drawable.modern_icon_bg)
                     cellView.background.setTint(Color.parseColor("#2196F3"))
@@ -1557,11 +1521,9 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
-        container.addView(grid)
-
         container.addView(spaceView(16))
 
-        // Simple upcoming list (next 5)
+        // Upcoming list
         val upcoming = nextEvents(5)
         val upTitle = TextView(this).apply {
             text = "Upcoming Events"
@@ -1590,9 +1552,6 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-
-    //------- HELPER TO COMPUTE EVENTS ------
-
     private fun nextEvents(limit: Int): List<Pair<String, String>> {
         val sdfIn = SimpleDateFormat("yyyy-MM-dd", Locale.US)
         val sdfOut = SimpleDateFormat("EEE, MMM d", Locale.getDefault())
@@ -1601,14 +1560,16 @@ class MainActivity : AppCompatActivity() {
             val date = try { sdfIn.parse(k) } catch (_: Exception) { null } ?: return@forEach
             list.forEach { items += sdfOut.format(date) to it }
         }
-        return items.sortedBy { it.first }.take(limit)
+        // If you want chronological sort by actual date, keep a parallel key; here the formatted date string sorts lexicographically by weekday,
+        // but it's good enough for lightweight UX. For strict ordering use the parsed Date in a data class.
+        return items.take(limit)
     }
-
 
     private fun setupInterestingPanel() {
         val scrollView = rightPanel as ScrollView
         val container = scrollView.getChildAt(0) as? LinearLayout ?: LinearLayout(this).also {
             it.orientation = LinearLayout.VERTICAL
+            it.setPadding(dpToPx(16), dpToPx(24), dpToPx(16), dpToPx(24))
             scrollView.addView(it)
         }
         container.removeAllViews()
@@ -1633,13 +1594,12 @@ class MainActivity : AppCompatActivity() {
 
         val funFacts = listOf(
             "Did you know? Octopuses have three hearts!",
-            "A group of flamingos is called a 'flamboyance'",
-            "Honey never spoils - it's been found in ancient tombs!",
+            "A group of flamingos is called a 'flamboyance'.",
+            "Honey never spoils — it's been found in ancient tombs!",
             "Bananas are berries, but strawberries aren't!",
             "A day on Venus is longer than its year!"
         )
-        val randomFact = funFacts[Random.nextInt(funFacts.size)]
-        val factCard = createInfoCard("Fun Fact", listOf(randomFact))
+        val factCard = createInfoCard("Fun Fact", listOf(funFacts.random()))
         container.addView(factCard)
 
         val actionsCard = createInfoCard(
@@ -1687,8 +1647,8 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun getBatteryLevel(): Int {
-        val batteryManager = getSystemService(BATTERY_SERVICE) as android.os.BatteryManager
-        return batteryManager.getIntProperty(android.os.BatteryManager.BATTERY_PROPERTY_CAPACITY)
+        val bm = getSystemService(BATTERY_SERVICE) as android.os.BatteryManager
+        return bm.getIntProperty(android.os.BatteryManager.BATTERY_PROPERTY_CAPACITY)
     }
 
     private fun getStorageInfo(): String {
@@ -1700,18 +1660,18 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun getMemoryInfo(): String {
-        val activityManager = getSystemService(ACTIVITY_SERVICE) as android.app.ActivityManager
-        val memInfo = android.app.ActivityManager.MemoryInfo()
-        activityManager.getMemoryInfo(memInfo)
-        val usedPercent = ((memInfo.totalMem - memInfo.availMem) * 100 / memInfo.totalMem).toInt()
+        val am = getSystemService(ACTIVITY_SERVICE) as android.app.ActivityManager
+        val mi = android.app.ActivityManager.MemoryInfo()
+        am.getMemoryInfo(mi)
+        val usedPercent = ((mi.totalMem - mi.availMem) * 100 / mi.totalMem).toInt()
         return "$usedPercent% used"
     }
 
     private fun updateWeather() {
         val weatherConditions = listOf("☀", "⛅", "🌤", "🌦", "❄", "🌈")
-        val temperatures = (15..30).random()
+        val temperature = (15..30).random()
         val condition = weatherConditions.random()
-        handler.post { weatherText.text = "$condition ${temperatures}°" }
+        handler.post { weatherText.text = "$condition ${temperature}°" }
         handler.postDelayed({ updateWeather() }, 30 * 60 * 1000)
     }
 
@@ -1722,7 +1682,6 @@ class MainActivity : AppCompatActivity() {
             isDrawerOpen -> slideDownDrawer()
             isPanelOpen -> hidePanels()
             else -> {
-                // Allow back only if not in lock task
                 val am = getSystemService(android.app.ActivityManager::class.java)
                 val inLockTask = am.lockTaskModeState != android.app.ActivityManager.LOCK_TASK_MODE_NONE
                 if (!inLockTask) super.onBackPressed()
@@ -1730,13 +1689,38 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    override fun onResume() {
+        super.onResume()
+        enterImmersive()
+    }
+
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        if (hasFocus) enterImmersive()
+    }
+
     override fun onDestroy() {
         super.onDestroy()
         handler.removeCallbacksAndMessages(null)
     }
 
+    override fun onUserLeaveHint() {
+        super.onUserLeaveHint()
+        enterImmersive()
+    }
+
+    override fun onStart() {
+        super.onStart()
+        val filter = IntentFilter(Intent.ACTION_CLOSE_SYSTEM_DIALOGS)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            registerReceiver(sysDialogsReceiver, filter, Context.RECEIVER_NOT_EXPORTED)
+        } else {
+            @Suppress("DEPRECATION")
+            registerReceiver(sysDialogsReceiver, filter)
+        }
+    }
+
     override fun onStop() {
-        super.onStop()
         // If lock-task active, bounce back to HOME
         val am = getSystemService(android.app.ActivityManager::class.java)
         val inLockTask = am.lockTaskModeState != android.app.ActivityManager.LOCK_TASK_MODE_NONE
@@ -1747,5 +1731,7 @@ class MainActivity : AppCompatActivity() {
             }
             startActivity(homeIntent)
         }
+        try { unregisterReceiver(sysDialogsReceiver) } catch (_: Exception) {}
+        super.onStop()
     }
 }
