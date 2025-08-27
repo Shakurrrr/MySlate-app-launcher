@@ -1,19 +1,25 @@
 package com.myslates.launcher
 
 import android.app.ActivityManager
+import android.app.role.RoleManager
 import android.content.ClipData
 import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.content.pm.PackageManager
+import android.content.res.ColorStateList
 import android.graphics.Color
 import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.provider.Settings
 import android.text.TextUtils
 import android.util.Base64
 import android.util.Log
 import android.view.*
+import android.view.WindowInsets
+import android.view.WindowInsetsController
 import android.view.animation.AccelerateDecelerateInterpolator
 import android.widget.*
 import androidx.appcompat.app.AlertDialog
@@ -23,6 +29,9 @@ import androidx.recyclerview.widget.GridLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
+import com.google.android.material.button.MaterialButton
+import com.google.android.material.shape.CornerFamily
+import com.google.android.material.shape.ShapeAppearanceModel
 import java.security.MessageDigest
 import java.security.SecureRandom
 import java.text.SimpleDateFormat
@@ -30,16 +39,6 @@ import java.util.*
 import javax.crypto.SecretKeyFactory
 import javax.crypto.spec.PBEKeySpec
 import kotlin.math.min
-import kotlin.random.Random
-import android.content.res.ColorStateList
-import android.widget.LinearLayout
-import com.google.android.material.button.MaterialButton
-import com.google.android.material.shape.CornerFamily
-import com.google.android.material.shape.ShapeAppearanceModel
-import android.content.BroadcastReceiver
-import android.content.IntentFilter
-import android.view.WindowInsets
-import android.view.WindowInsetsController
 
 // NOTE: Using the in-file PasswordStore (no import of com.myslates.launcher.security.PasswordStore)
 
@@ -199,8 +198,14 @@ class MainActivity : AppCompatActivity() {
         "com.adobe.reader"
     )
 
-    // --- System dialogs receiver (now at class scope) ---
-    private val sysDialogsReceiver = object : BroadcastReceiver() {
+    // --- One-time default-launcher prompt flag ---
+    private val FIRST_RUN_PREFS by lazy { getSharedPreferences("first_run_prefs", MODE_PRIVATE) }
+    private var askedDefaultLauncherOnce: Boolean
+        get() = FIRST_RUN_PREFS.getBoolean("asked_default_launcher_once", false)
+        set(v) { FIRST_RUN_PREFS.edit().putBoolean("asked_default_launcher_once", v).apply() }
+
+    // --- System dialogs receiver ---
+    private val sysDialogsReceiver = object : android.content.BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
             if (intent.action == Intent.ACTION_CLOSE_SYSTEM_DIALOGS) {
                 enterImmersive()
@@ -214,8 +219,6 @@ class MainActivity : AppCompatActivity() {
         setTheme(R.style.Theme_MySlates_Dark)
         setContentView(R.layout.activity_main)
         enterImmersive()
-
-        // (Removed DevicePolicy/DeviceOwner path) — we run pure lock-task kiosk.
 
         initializeViews()
         setupDragAndDrop()
@@ -234,6 +237,11 @@ class MainActivity : AppCompatActivity() {
         homeGridAdapter.notifyDataSetChanged()
 
         applyTabletScaling()
+
+        // Show one-time prompt to set as default launcher if not already
+        if (!isDefaultLauncher() && !askedDefaultLauncherOnce) {
+            showDefaultLauncherPrompt()
+        }
     }
 
     private fun isLockTaskModeRunning(): Boolean {
@@ -269,15 +277,12 @@ class MainActivity : AppCompatActivity() {
     private fun showAdminPanel() {
         // Authenticate first
         showPinDialog {
-            val options = arrayOf("Exit Kiosk Mode", "Change Admin Password")
+            val options = arrayOf("Accessibility settings", "Change Admin Password")
             AlertDialog.Builder(this)
                 .setTitle("Admin Panel")
                 .setItems(options) { _, which ->
                     when (which) {
-                        0 -> {
-                            disableKioskModeIfActive()
-                            Toast.makeText(this, "Kiosk disabled", Toast.LENGTH_SHORT).show()
-                        }
+                        0 -> openAccessibilitySettings()
                         1 -> showChangePasswordDialog()
                     }
                 }
@@ -285,6 +290,18 @@ class MainActivity : AppCompatActivity() {
                 .show()
         }
     }
+
+    private fun openAccessibilitySettings() {
+        try {
+            startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS).apply {
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            })
+        } catch (_: Exception) {
+            // Last-resort fallback if the specific screen isn't available
+            try { startActivity(Intent(Settings.ACTION_SETTINGS)) } catch (_: Exception) { /* ignore */ }
+        }
+    }
+
 
     // In-launcher Change Password dialog (local-only)
     private fun showChangePasswordDialog() {
@@ -537,6 +554,112 @@ class MainActivity : AppCompatActivity() {
             }
             .start()
     }
+
+
+    // --- Drawer animations ---
+    private fun slideUpDrawer() {
+        if (!isFinishing && !isDestroyed) {
+            appDrawer.animate()
+                .translationY(0f)
+                .setDuration(300)
+                .setInterpolator(AccelerateDecelerateInterpolator())
+                .start()
+            blurOverlay.visibility = View.VISIBLE
+            blurOverlay.animate().alpha(0.7f).setDuration(300).start()
+            isDrawerOpen = true
+        }
+    }
+
+    private fun slideDownDrawer() {
+        if (!isFinishing && !isDestroyed) {
+            appDrawer.animate()
+                .translationY(appDrawer.height.toFloat())
+                .setDuration(300)
+                .setInterpolator(AccelerateDecelerateInterpolator())
+                .start()
+            blurOverlay.animate()
+                .alpha(0f)
+                .setDuration(300)
+                .withEndAction { blurOverlay.visibility = View.GONE }
+                .start()
+            // If you have a search box, clear it when closing
+            searchInput.clearFocus()
+            searchInput.setText("")
+            isDrawerOpen = false
+        }
+    }
+
+    // --- Panels (wrappers around your existing hideLeftPanel/hideRightPanel) ---
+    private fun showLeftPanel() {
+        if (isPanelOpen) return
+        isPanelOpen = true
+        setupCalendarPanel()
+        rightPanel.visibility = View.GONE
+        leftPanel.visibility = View.VISIBLE
+        leftPanel.post {
+            leftPanel.translationX = -leftPanel.width.toFloat()
+            leftPanel.animate()
+                .translationX(0f)
+                .setDuration(300)
+                .setInterpolator(AccelerateDecelerateInterpolator())
+                .start()
+        }
+        // tap anywhere on the panel hides both
+        leftPanel.setOnClickListener { hidePanels() }
+    }
+
+    private fun showRightPanel() {
+        if (isPanelOpen) return
+        isPanelOpen = true
+        setupInterestingPanel()
+        leftPanel.visibility = View.GONE
+        rightPanel.visibility = View.VISIBLE
+        rightPanel.post {
+            rightPanel.translationX = rightPanel.width.toFloat()
+            rightPanel.animate()
+                .translationX(0f)
+                .setDuration(300)
+                .setInterpolator(AccelerateDecelerateInterpolator())
+                .start()
+        }
+        rightPanel.setOnClickListener { hidePanels() }
+    }
+
+    private fun hidePanels() {
+        isPanelOpen = false
+        if (leftPanel.visibility == View.VISIBLE) {
+            leftPanel.animate()
+                .translationX(-leftPanel.width.toFloat())
+                .setDuration(250)
+                .setInterpolator(AccelerateDecelerateInterpolator())
+                .withEndAction { leftPanel.visibility = View.GONE; leftPanel.setOnClickListener(null) }
+                .start()
+        }
+        if (rightPanel.visibility == View.VISIBLE) {
+            rightPanel.animate()
+                .translationX(rightPanel.width.toFloat())
+                .setDuration(250)
+                .setInterpolator(AccelerateDecelerateInterpolator())
+                .withEndAction { rightPanel.visibility = View.GONE; rightPanel.setOnClickListener(null) }
+                .start()
+        }
+    }
+
+    // --- Time text updater ---
+    private fun startTimeUpdater() {
+        val timeRunnable = object : Runnable {
+            override fun run() {
+                val now = java.util.Calendar.getInstance().time
+                val timeFormat = java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault())
+                val dateFormat = java.text.SimpleDateFormat("EEE, MMM d", java.util.Locale.getDefault())
+                timeText.text = timeFormat.format(now)
+                dateText.text = dateFormat.format(now)
+                handler.postDelayed(this, 1000)
+            }
+        }
+        handler.post(timeRunnable)
+    }
+
 
     // -------  CALENDAR  RESPONSIVENESS ------
 
@@ -1300,105 +1423,55 @@ class MainActivity : AppCompatActivity() {
         dialog.show()
     }
 
-    // --- Immersive helpers (single definition) ---
-    private fun enterImmersive() {
-        if (Build.VERSION.SDK_INT >= 30) {
-            window.setDecorFitsSystemWindows(false)
-            window.insetsController?.let { c ->
-                c.hide(WindowInsets.Type.statusBars() or WindowInsets.Type.navigationBars())
-                c.systemBarsBehavior =
-                    WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
-            }
-        } else {
-            @Suppress("DEPRECATION")
-            window.decorView.systemUiVisibility =
-                View.SYSTEM_UI_FLAG_LAYOUT_STABLE or
-                        View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION or
-                        View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN or
-                        View.SYSTEM_UI_FLAG_HIDE_NAVIGATION or
-                        View.SYSTEM_UI_FLAG_FULLSCREEN or
-                        View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
-        }
-    }
+    // ---------- Default Launcher: prompt + settings jump ----------
 
-    private fun slideUpDrawer() {
-        if (!isFinishing && !isDestroyed) {
-            appDrawer.animate().translationY(0f).setDuration(300)
-                .setInterpolator(AccelerateDecelerateInterpolator()).start()
-            blurOverlay.visibility = View.VISIBLE
-            blurOverlay.animate().alpha(0.7f).setDuration(300).start()
-            isDrawerOpen = true
-        }
-    }
 
-    private fun slideDownDrawer() {
-        if (!isFinishing && !isDestroyed) {
-            appDrawer.animate().translationY(appDrawer.height.toFloat()).setDuration(300)
-                .setInterpolator(AccelerateDecelerateInterpolator()).start()
-            blurOverlay.animate().alpha(0f).setDuration(300).withEndAction {
-                blurOverlay.visibility = View.GONE
-            }.start()
-            searchInput.clearFocus()
-            searchInput.setText("")
-            isDrawerOpen = false
-        }
-    }
+    /** Try to open the "Choose default apps" screen. Has several fallbacks for OEMs/versions. */
+    private fun openDefaultAppsSettings() {
+        val tries = mutableListOf<Intent>()
 
-    private fun showLeftPanel() {
-        if (isPanelOpen) return
-        isPanelOpen = true
-        setupCalendarPanel()
-        leftPanel.visibility = View.VISIBLE
-        leftPanel.post {
-            leftPanel.translationX = -leftPanel.width.toFloat()
-            leftPanel.animate().translationX(0f).setDuration(300)
-                .setInterpolator(AccelerateDecelerateInterpolator()).start()
+        // 1) Direct "Manage default apps" (works on many AOSP/OEM builds)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+            tries += Intent(Settings.ACTION_MANAGE_DEFAULT_APPS_SETTINGS)
         }
-        leftPanel.setOnClickListener { hidePanels() }
-    }
-
-    private fun showRightPanel() {
-        if (isPanelOpen) return
-        isPanelOpen = true
-        setupInterestingPanel()
-        rightPanel.visibility = View.VISIBLE
-        rightPanel.post {
-            rightPanel.translationX = rightPanel.width.toFloat()
-            rightPanel.animate().translationX(0f).setDuration(300)
-                .setInterpolator(AccelerateDecelerateInterpolator()).start()
-        }
-        rightPanel.setOnClickListener { hidePanels() }
-    }
-
-    private fun hidePanels() {
-        isPanelOpen = false
-        if (leftPanel.visibility == View.VISIBLE) {
-            leftPanel.animate().translationX(-leftPanel.width.toFloat()).setDuration(250)
-                .setInterpolator(AccelerateDecelerateInterpolator())
-                .withEndAction { leftPanel.visibility = View.GONE; leftPanel.setOnClickListener(null) }
-                .start()
-        }
-        if (rightPanel.visibility == View.VISIBLE) {
-            rightPanel.animate().translationX(rightPanel.width.toFloat()).setDuration(250)
-                .setInterpolator(AccelerateDecelerateInterpolator())
-                .withEndAction { rightPanel.visibility = View.GONE; rightPanel.setOnClickListener(null) }
-                .start()
-        }
-    }
-
-    private fun startTimeUpdater() {
-        val timeRunnable = object : Runnable {
-            override fun run() {
-                val now = Calendar.getInstance().time
-                val timeFormat = SimpleDateFormat("HH:mm", Locale.getDefault())
-                val dateFormat = SimpleDateFormat("EEE, MMM d", Locale.getDefault())
-                timeText.text = timeFormat.format(now)
-                dateText.text = dateFormat.format(now)
-                handler.postDelayed(this, 1000)
+        // 2) Specific Home settings picker (AOSP)
+        tries += Intent(Settings.ACTION_HOME_SETTINGS)
+        // 3) General Apps settings as a last resort
+        tries += Intent(Settings.ACTION_APPLICATION_SETTINGS)
+        // 4) On Android 10+ some devices handle this better via RoleManager UI for HOME
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            val rm = getSystemService(RoleManager::class.java)
+            if (rm != null && !rm.isRoleHeld(RoleManager.ROLE_HOME)) {
+                // Role UI is another good route to the exact same decision
+                tries += rm.createRequestRoleIntent(RoleManager.ROLE_HOME)
             }
         }
-        handler.post(timeRunnable)
+
+        for (intent in tries) {
+            try {
+                // Prefer starting as a new task so user returns to launcher after
+                intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                startActivity(intent)
+                return
+            } catch (_: Exception) { /* try next */ }
+        }
+        Toast.makeText(this, "Unable to open Default apps settings on this device.", Toast.LENGTH_LONG).show()
     }
+
+    /** Show one-time dialog asking user to set this app as default launcher. */
+    private fun showDefaultLauncherPrompt() {
+        askedDefaultLauncherOnce = true
+        AlertDialog.Builder(this)
+            .setTitle("Set as default launcher?")
+            .setMessage("To use MySlates whenever you go Home, set it as your default Home app.")
+            .setPositiveButton("Yes") { _, _ -> openDefaultAppsSettings() }
+            .setNegativeButton("Not now", null)
+            .show()
+    }
+
+    // ---------- Right/Left panels (restored to original style) ----------
+
+    // ---------- Right/Left panels ----------
 
     private fun setupCalendarPanel() {
         if (eventsByDay.isEmpty()) loadEventsFromPrefs()
@@ -1560,8 +1633,6 @@ class MainActivity : AppCompatActivity() {
             val date = try { sdfIn.parse(k) } catch (_: Exception) { null } ?: return@forEach
             list.forEach { items += sdfOut.format(date) to it }
         }
-        // If you want chronological sort by actual date, keep a parallel key; here the formatted date string sorts lexicographically by weekday,
-        // but it's good enough for lightweight UX. For strict ordering use the parsed Date in a data class.
         return items.take(limit)
     }
 
@@ -1602,6 +1673,7 @@ class MainActivity : AppCompatActivity() {
         val factCard = createInfoCard("Fun Fact", listOf(funFacts.random()))
         container.addView(factCard)
 
+        // Keep the original simple text list for Quick Actions (no buttons).
         val actionsCard = createInfoCard(
             "Quick Actions", listOf(
                 "📱 Device Settings",
@@ -1645,6 +1717,58 @@ class MainActivity : AppCompatActivity() {
         }
         return card
     }
+
+    // ---------- Default Launcher helpers (kept minimal) ----------
+
+    /** True iff this app is currently the selected HOME handler */
+    private fun isDefaultLauncher(): Boolean {
+        val intent = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME)
+        val res = packageManager.resolveActivity(intent, PackageManager.MATCH_DEFAULT_ONLY) ?: return false
+        return res.activityInfo?.packageName == packageName
+    }
+
+    /**
+     * Jump the user straight to "Choose default apps" → Home app.
+     * Primary target: ACTION_HOME_SETTINGS.
+     * Fallbacks are provided for broader device support.
+     */
+    private fun promptSetAsDefaultLauncher() {
+        // 1) Directly open the "Choose default apps" screen focused on Home app
+        val intents = mutableListOf(
+            Intent(Settings.ACTION_HOME_SETTINGS),
+            // Some OEMs honor this general default apps screen
+            Intent(Settings.ACTION_MANAGE_DEFAULT_APPS_SETTINGS),
+            // Absolute last resort: generic Settings
+            Intent(Settings.ACTION_SETTINGS)
+        )
+        for (i in intents) {
+            try {
+                startActivity(i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                return
+            } catch (_: Exception) { /* try next */ }
+        }
+    }
+
+    /** Shows the snackbar prompt if we're not default yet. */
+    private fun showDefaultLauncherSnackbarIfNeeded() {
+        if (isDefaultLauncher()) return
+        val anchor = findViewById<View>(android.R.id.content)
+        try {
+            com.google.android.material.snackbar.Snackbar
+                .make(anchor, "Make MySlates your default launcher?", com.google.android.material.snackbar.Snackbar.LENGTH_LONG)
+                .setAction("Set default") { promptSetAsDefaultLauncher() }
+                .show()
+        } catch (_: Throwable) {
+            // Fallback dialog if Snackbar cannot render
+            AlertDialog.Builder(this)
+                .setMessage("Make MySlates your default launcher?")
+                .setPositiveButton("Set default") { _, _ -> promptSetAsDefaultLauncher() }
+                .setNegativeButton("Not now", null)
+                .show()
+        }
+    }
+
+    // ---------- System info helpers ----------
 
     private fun getBatteryLevel(): Int {
         val bm = getSystemService(BATTERY_SERVICE) as android.os.BatteryManager
@@ -1718,6 +1842,8 @@ class MainActivity : AppCompatActivity() {
             @Suppress("DEPRECATION")
             registerReceiver(sysDialogsReceiver, filter)
         }
+        // Gentle reminder if not default yet
+        showDefaultLauncherSnackbarIfNeeded()
     }
 
     override fun onStop() {
@@ -1733,5 +1859,27 @@ class MainActivity : AppCompatActivity() {
         }
         try { unregisterReceiver(sysDialogsReceiver) } catch (_: Exception) {}
         super.onStop()
+    }
+
+    // --- Immersive helpers ---
+
+    private fun enterImmersive() {
+        if (Build.VERSION.SDK_INT >= 30) {
+            window.setDecorFitsSystemWindows(false)
+            window.insetsController?.let { c ->
+                c.hide(WindowInsets.Type.statusBars() or WindowInsets.Type.navigationBars())
+                c.systemBarsBehavior =
+                    WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+            }
+        } else {
+            @Suppress("DEPRECATION")
+            window.decorView.systemUiVisibility =
+                View.SYSTEM_UI_FLAG_LAYOUT_STABLE or
+                        View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION or
+                        View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN or
+                        View.SYSTEM_UI_FLAG_HIDE_NAVIGATION or
+                        View.SYSTEM_UI_FLAG_FULLSCREEN or
+                        View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
+        }
     }
 }
