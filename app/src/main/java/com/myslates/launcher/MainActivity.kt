@@ -39,6 +39,7 @@ import java.util.*
 import javax.crypto.SecretKeyFactory
 import javax.crypto.spec.PBEKeySpec
 import kotlin.math.min
+import android.net.Uri
 
 // NOTE: Using the in-file PasswordStore (no import of com.myslates.launcher.security.PasswordStore)
 
@@ -195,7 +196,10 @@ class MainActivity : AppCompatActivity() {
 
     private val allowedApps = listOf(
         "com.ATS.MySlates",
-        "com.adobe.reader"
+        "com.adobe.reader",
+        "com.asataura.myslates_kids",
+        "com.ATS.MySlates.Parent",
+        "com.ATS.MySlates.Teacher"
     )
 
     // --- One-time default-launcher prompt flag ---
@@ -1181,12 +1185,22 @@ class MainActivity : AppCompatActivity() {
 
     private fun loadApps() {
         val pm = packageManager
-        allFilteredApps = pm.getInstalledApplications(PackageManager.GET_META_DATA)
+
+        // ✅ Get only apps that can actually appear in the launcher
+        val intent = Intent(Intent.ACTION_MAIN).apply {
+            addCategory(Intent.CATEGORY_LAUNCHER)
+        }
+
+        val resolveInfos = pm.queryIntentActivities(intent, 0)
+
+        allFilteredApps = resolveInfos
+            .map { it.activityInfo.applicationInfo }
+            .distinctBy { it.packageName }
             .filter { allowedApps.contains(it.packageName) }
-            .map {
-                val label = pm.getApplicationLabel(it).toString()
-                val icon = pm.getApplicationIcon(it)
-                AppObject(label, icon, it.packageName)
+            .map { appInfo ->
+                val label = pm.getApplicationLabel(appInfo).toString()
+                val icon = pm.getApplicationIcon(appInfo)
+                AppObject(label, icon, appInfo.packageName)
             }
 
         adapter = AppAdapter(this, allFilteredApps) { app -> handleDrawerAppDrag(app) }
@@ -1206,6 +1220,7 @@ class MainActivity : AppCompatActivity() {
 
         loadBottomBarApps()
     }
+
 
     private fun handleDrawerAppDrag(app: AppObject) {
         val clipData = ClipData.newPlainText("drawer_app", app.packageName)
@@ -1750,23 +1765,24 @@ class MainActivity : AppCompatActivity() {
     }
 
     /** Shows the snackbar prompt if we're not default yet. */
+    /** Shows a concise, actionable Snackbar if we're not default yet. */
     private fun showDefaultLauncherSnackbarIfNeeded() {
         if (isDefaultLauncher()) return
         val anchor = findViewById<View>(android.R.id.content)
         try {
             com.google.android.material.snackbar.Snackbar
-                .make(anchor, "Make MySlates your default launcher?", com.google.android.material.snackbar.Snackbar.LENGTH_LONG)
-                .setAction("Set default") { promptSetAsDefaultLauncher() }
+                .make(anchor, "Set MySlates as your Home app for a streamlined experience.", com.google.android.material.snackbar.Snackbar.LENGTH_LONG)
+                .setAction("Set as default") { promptSetAsDefaultLauncher() }
                 .show()
         } catch (_: Throwable) {
-            // Fallback dialog if Snackbar cannot render
             AlertDialog.Builder(this)
-                .setMessage("Make MySlates your default launcher?")
-                .setPositiveButton("Set default") { _, _ -> promptSetAsDefaultLauncher() }
+                .setMessage("Set MySlates as your Home app for a streamlined experience.")
+                .setPositiveButton("Set as default") { _, _ -> promptSetAsDefaultLauncher() }
                 .setNegativeButton("Not now", null)
                 .show()
         }
     }
+
 
     // ---------- System info helpers ----------
 
@@ -1816,6 +1832,7 @@ class MainActivity : AppCompatActivity() {
     override fun onResume() {
         super.onResume()
         enterImmersive()
+        loadApps()
     }
 
     override fun onWindowFocusChanged(hasFocus: Boolean) {
