@@ -194,13 +194,62 @@ class MainActivity : AppCompatActivity() {
     // yyyy-MM-dd -> list of event titles
     private val eventsByDay: MutableMap<String, MutableList<String>> = mutableMapOf()
 
-    private val allowedApps = listOf(
-        "com.ATS.MySlates",
-        "com.adobe.reader",
-        "com.asataura.myslates_kids",
-        "com.ATS.MySlates.Parent",
-        "com.ATS.MySlates.Teacher"
+    private data class FeaturedAppConfig(
+        val packageName: String,
+        val fallbackLabel: String,
+        val storeUrl: String
     )
+
+    private val featuredApps = listOf(
+        FeaturedAppConfig(
+            packageName = "com.ATS.MySlates",
+            fallbackLabel = "MySlates",
+            storeUrl = "market://details?id=com.ATS.MySlates"
+        ),
+        FeaturedAppConfig(
+            packageName = "com.adobe.reader",
+            fallbackLabel = "Adobe Reader",
+            storeUrl = "market://details?id=com.adobe.reader"
+        ),
+        FeaturedAppConfig(
+            packageName = "com.asataura.myslates_kids",
+            fallbackLabel = "MySlates Kids",
+            storeUrl = "market://details?id=com.asataura.myslates_kids"
+        ),
+        FeaturedAppConfig(
+            packageName = "com.ATS.MySlates.Parent",
+            fallbackLabel = "MySlates Parent",
+            storeUrl = "market://details?id=com.ATS.MySlates.Parent"
+        ),
+        FeaturedAppConfig(
+            packageName = "com.ATS.MySlates.Teacher",
+            fallbackLabel = "MySlates Teacher",
+            storeUrl = "market://details?id=com.ATS.MySlates.Teacher"
+        ),
+    )
+    private val allowedApps = featuredApps.map { it.packageName } + "com.android.vending"
+
+    private fun isPackageInstalled(packageName: String): Boolean {
+        return try {
+            packageManager.getPackageInfo(packageName, 0)
+            true
+        } catch (_: Exception) {
+            false
+        }
+    }
+
+    private fun openStoreOrFallback(packageName: String, storeUrl: String) {
+        try {
+            startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(storeUrl)))
+        } catch (_: Exception) {
+            startActivity(
+                Intent(
+                    Intent.ACTION_VIEW,
+                    Uri.parse("https://play.google.com/store/apps/details?id=$packageName")
+                )
+            )
+        }
+    }
 
     // --- One-time default-launcher prompt flag ---
     private val FIRST_RUN_PREFS by lazy { getSharedPreferences("first_run_prefs", MODE_PRIVATE) }
@@ -1186,14 +1235,11 @@ class MainActivity : AppCompatActivity() {
     private fun loadApps() {
         val pm = packageManager
 
-        // ✅ Get only apps that can actually appear in the launcher
-        val intent = Intent(Intent.ACTION_MAIN).apply {
+        val launcherIntent = Intent(Intent.ACTION_MAIN).apply {
             addCategory(Intent.CATEGORY_LAUNCHER)
         }
 
-        val resolveInfos = pm.queryIntentActivities(intent, 0)
-
-        allFilteredApps = resolveInfos
+        val installedLauncherApps = pm.queryIntentActivities(launcherIntent, 0)
             .map { it.activityInfo.applicationInfo }
             .distinctBy { it.packageName }
             .filter { allowedApps.contains(it.packageName) }
@@ -1202,8 +1248,31 @@ class MainActivity : AppCompatActivity() {
                 val icon = pm.getApplicationIcon(appInfo)
                 AppObject(label, icon, appInfo.packageName)
             }
+            .toMutableList()
 
-        adapter = AppAdapter(this, allFilteredApps) { app -> handleDrawerAppDrag(app) }
+        // Force featured apps into the drawer even if not installed
+        featuredApps.forEach { featured ->
+            val alreadyPresent = installedLauncherApps.any { it.packageName == featured.packageName }
+            if (!alreadyPresent) {
+                val fallbackIcon = ContextCompat.getDrawable(this, R.mipmap.ic_launcher) ?: return@forEach
+                installedLauncherApps.add(
+                    AppObject(
+                        featured.fallbackLabel,
+                        fallbackIcon,
+                        featured.packageName
+                    )
+                )
+            }
+        }
+
+        allFilteredApps = installedLauncherApps.sortedBy { it.label.lowercase(Locale.getDefault()) }
+
+        adapter = AppAdapter(
+            context = this,
+            apps = allFilteredApps,
+            onAppClick = { app -> launchApp(app.packageName) },
+            onAppDrag = { app -> handleDrawerAppDrag(app) }
+        )
         appGridView.numColumns = 2
         appGridView.adapter = adapter
 
@@ -1332,13 +1401,26 @@ class MainActivity : AppCompatActivity() {
                 }
                 return
             }
-            packageManager.getLaunchIntentForPackage(packageName)?.let { startActivity(it) }
-                ?: Toast.makeText(this, "App not found: $packageName", Toast.LENGTH_SHORT).show()
+
+            val launchIntent = packageManager.getLaunchIntentForPackage(packageName)
+            if (launchIntent != null) {
+                startActivity(launchIntent)
+                return
+            }
+
+            val featured = featuredApps.firstOrNull { it.packageName == packageName }
+            if (featured != null) {
+                openStoreOrFallback(featured.packageName, featured.storeUrl)
+                return
+            }
+
+            Toast.makeText(this, "App not found: $packageName", Toast.LENGTH_SHORT).show()
         } catch (e: Exception) {
             Toast.makeText(this, "Cannot launch app: ${e.message}", Toast.LENGTH_SHORT).show()
             Log.e("MainActivity", "Failed to launch $packageName", e)
         }
     }
+
 
     private fun showPinDialog(onSuccess: () -> Unit) {
         val container = LinearLayout(this).apply {

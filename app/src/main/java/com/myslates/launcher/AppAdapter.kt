@@ -13,6 +13,7 @@ import androidx.core.content.ContextCompat
 class AppAdapter(
     private val context: Context,
     private var apps: List<AppObject>,
+    private val onAppClick: (AppObject) -> Unit,
     private val onAppDrag: (AppObject) -> Unit
 ) : BaseAdapter() {
 
@@ -36,7 +37,6 @@ class AppAdapter(
 
         val app = getItem(position)
 
-        // Modern app icon styling
         iconView.apply {
             setImageDrawable(app.icon)
             scaleType = ImageView.ScaleType.CENTER_CROP
@@ -48,18 +48,11 @@ class AppAdapter(
         labelView.text = app.label
         labelView.setTextColor(Color.WHITE)
 
-        // Launch app on tap
         view.setOnClickListener {
             Log.d("AppAdapter", "Clicked on ${app.label}")
-            try {
-                val intent = context.packageManager.getLaunchIntentForPackage(app.packageName)
-                intent?.let { context.startActivity(it) }
-            } catch (e: Exception) {
-                Log.e("AppAdapter", "Failed to launch ${app.label}", e)
-            }
+            onAppClick(app)
         }
 
-        // Start drag on long press
         view.setOnLongClickListener {
             Log.d("AppAdapter", "Long clicked on ${app.label}")
 
@@ -70,17 +63,15 @@ class AppAdapter(
             view.startDragAndDrop(
                 clipData,
                 shadow,
-                dragData, // localState is DragData
+                dragData,
                 View.DRAG_FLAG_GLOBAL
             )
 
-            // Trigger the drag handler
             onAppDrag(app)
             true
         }
 
         addTouchFeedback(view)
-
         return view
     }
 

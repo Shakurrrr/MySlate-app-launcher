@@ -57,7 +57,6 @@ class HomeGridAdapter(
             holder.itemView.setOnLongClickListener {
                 Log.d("HomeGridAdapter", "Long press on ${app.label} at $position")
                 onAppLongClick(app, position)
-                onAppDrag(app, position)
                 true
             }
 
