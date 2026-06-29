@@ -40,6 +40,10 @@ import javax.crypto.SecretKeyFactory
 import javax.crypto.spec.PBEKeySpec
 import kotlin.math.min
 import android.net.Uri
+import com.myslates.launcher.data.IconCache
+import com.myslates.launcher.data.IconRepository
+import com.myslates.launcher.ui.theme.AppPreviewAdapter
+import com.myslates.launcher.data.PreviewApp
 
 // NOTE: Using the in-file PasswordStore (no import of com.myslates.launcher.security.PasswordStore)
 
@@ -107,7 +111,7 @@ private object PasswordStore {
     private fun recordFailure(ctx: android.content.Context) {
         val p = prefs(ctx)
         val fails = p.getInt(KEY_FAILS, 0) + 1
-        val backoffSec = if (fails < MAX_BEFORE_BACKOFF) 0 else min(600, 30 shl (fails - MAX_BEFORE_BACKOFF)) // 30,60,120,... cap 600
+        val backoffSec = if (fails < MAX_BEFORE_BACKOFF) 0 else min(600, 30 shl (fails - MAX_BEFORE_BACKOFF))
         p.edit()
             .putInt(KEY_FAILS, fails)
             .putLong(KEY_LOCK_UNTIL, if (backoffSec == 0) 0L else System.currentTimeMillis() + backoffSec * 1000L)
@@ -128,7 +132,7 @@ private object PasswordStore {
 }
 
 private object PasswordPolicy {
-    fun strongEnough(pw: String): Boolean = pw.length >= 6 // tighten if desired
+    fun strongEnough(pw: String): Boolean = pw.length >= 6
 }
 
 // -----------------------------------------------------------------------------
@@ -155,24 +159,23 @@ class MainActivity : AppCompatActivity() {
     private lateinit var bottomBar: LinearLayout
     private lateinit var removeAppZone: View
     private lateinit var pageIndicator: LinearLayout
+    private lateinit var appPreviewAdapter: AppPreviewAdapter
+    private lateinit var iconCache: IconCache
+    private lateinit var iconRepository: IconRepository
 
     private val handler = Handler(Looper.getMainLooper())
     private var isDrawerOpen = false
     private var isDragging = false
     private var isPanelOpen = false
     private var currentPage = 0
-    private val maxAppsPerPage = 6 // 2x3 grid
+    private val maxAppsPerPage = 6
     private val homeScreenApps = mutableListOf<AppObject?>()
-    // month currently rendered in the left panel
     private var calMonth: Calendar = Calendar.getInstance()
 
-    // Fast duplicate check (kept in lockstep with homeScreenApps)
     private val homePackages = mutableSetOf<String>()
 
-    // Security (legacy fallback if no admin password set)
     private val PARENTAL_PIN = "123456"
 
-    // Kiosk pref (kept; not used to gate startup anymore)
     private val PREFS by lazy { getSharedPreferences("launcher_prefs", MODE_PRIVATE) }
 
     private var kioskEnabled: Boolean
@@ -188,10 +191,8 @@ class MainActivity : AppCompatActivity() {
     private val TIME_SP        get() = if (isTablet) 96f else 72f
     private val DATE_SP        get() = if (isTablet) 28f else 20f
 
-    // Calendar/events state
     private val CAL_STORE = "calendar_events_store"
     private val CAL_EVENTS_KEY = "events_json"
-    // yyyy-MM-dd -> list of event titles
     private val eventsByDay: MutableMap<String, MutableList<String>> = mutableMapOf()
 
     private data class FeaturedAppConfig(
@@ -201,31 +202,23 @@ class MainActivity : AppCompatActivity() {
     )
 
     private val featuredApps = listOf(
-        FeaturedAppConfig(
-            packageName = "com.ATS.MySlates",
-            fallbackLabel = "MySlates",
-            storeUrl = "market://details?id=com.ATS.MySlates"
-        ),
-        FeaturedAppConfig(
-            packageName = "com.adobe.reader",
-            fallbackLabel = "Adobe Reader",
-            storeUrl = "market://details?id=com.adobe.reader"
-        ),
-        FeaturedAppConfig(
-            packageName = "com.asataura.myslates_kids",
-            fallbackLabel = "MySlates Kids",
-            storeUrl = "market://details?id=com.asataura.myslates_kids"
-        ),
-        FeaturedAppConfig(
-            packageName = "com.ATS.MySlates.Parent",
-            fallbackLabel = "MySlates Parent",
-            storeUrl = "market://details?id=com.ATS.MySlates.Parent"
-        ),
-        FeaturedAppConfig(
-            packageName = "com.ATS.MySlates.Teacher",
-            fallbackLabel = "MySlates Teacher",
-            storeUrl = "market://details?id=com.ATS.MySlates.Teacher"
-        ),
+        FeaturedAppConfig("com.ATS.MySlates", "MySlates", "market://details?id=com.ATS.MySlates"),
+        FeaturedAppConfig("com.adobe.reader", "Adobe Reader", "market://details?id=com.adobe.reader"),
+        FeaturedAppConfig("com.asataura.myslates_kids", "MySlates Kids", "market://details?id=com.asataura.myslates_kids"),
+        FeaturedAppConfig("com.ATS.MySlates.Parent", "MySlates Parent", "market://details?id=com.ATS.MySlates.Parent"),
+        FeaturedAppConfig("com.ATS.MySlates.Teacher", "MySlates Teacher", "market://details?id=com.ATS.MySlates.Teacher"),
+        FeaturedAppConfig("com.sencatech.typingpractice", "Typing Practice", ""),
+        FeaturedAppConfig("com.sencatech.learninganimals", "Learning Animals", ""),
+        FeaturedAppConfig("com.sencatech.learningclothes", "Learning Clothes", ""),
+        FeaturedAppConfig("com.sencatech.learningfruits", "Learning Fruits", ""),
+        FeaturedAppConfig("com.sencatech.sportsgoo", "Learning Sports Goods", ""),
+        FeaturedAppConfig("com.sencatech.learningnotes", "Learning Note", ""),
+        FeaturedAppConfig("com.sencatech.learningtransportation", "Learning Transport", ""),
+        FeaturedAppConfig("com.sencatech.learningvegetables", "Learning Vegetables", ""),
+        FeaturedAppConfig("com.sencatech.howmanysquirrels", "How Many Squirrels", ""),
+        FeaturedAppConfig("com.sencatech.gatherfruit", "Gather Fruit", ""),
+        FeaturedAppConfig("com.sencatech.countingfish", "Counting Fish", ""),
+        FeaturedAppConfig("com.sencatech.iwawa.iwawadraw", "Draw", ""),
     )
     private val allowedApps = featuredApps.map { it.packageName } + "com.android.vending"
 
@@ -251,13 +244,11 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    // --- One-time default-launcher prompt flag ---
     private val FIRST_RUN_PREFS by lazy { getSharedPreferences("first_run_prefs", MODE_PRIVATE) }
     private var askedDefaultLauncherOnce: Boolean
         get() = FIRST_RUN_PREFS.getBoolean("asked_default_launcher_once", false)
         set(v) { FIRST_RUN_PREFS.edit().putBoolean("asked_default_launcher_once", v).apply() }
 
-    // --- System dialogs receiver ---
     private val sysDialogsReceiver = object : android.content.BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
             if (intent.action == Intent.ACTION_CLOSE_SYSTEM_DIALOGS) {
@@ -276,14 +267,19 @@ class MainActivity : AppCompatActivity() {
         initializeViews()
         setupDragAndDrop()
         setupHomeGrid()
+
+        // ✅ FIX: Initialize class-level lateinit properties BEFORE loadApps()
+        // Previously these were local `val` variables which left the class properties uninitialized,
+        // causing UninitializedPropertyAccessException when loadApps() tried to use iconRepository.
+        iconCache = IconCache(applicationContext)
+        iconRepository = IconRepository(applicationContext, iconCache)
+
         loadApps()
         startTimeUpdater()
         setupSwipeGestures()
 
-        // Long-press clock → Admin panel
         timeText.setOnLongClickListener { showAdminPanel(); true }
 
-        // Initialize with empty grid
         repeat(maxAppsPerPage) { homeScreenApps.add(null) }
         homePackages.clear()
         homePackages.addAll(homeScreenApps.mapNotNull { it?.packageName })
@@ -291,7 +287,10 @@ class MainActivity : AppCompatActivity() {
 
         applyTabletScaling()
 
-        // Show one-time prompt to set as default launcher if not already
+        // Home screen grid is intentionally empty — all apps live in the drawer.
+        // Only the bottom dock (loadBottomBarApps) shows apps on the home screen.
+        homeGridRecyclerView.visibility = View.GONE
+
         if (!isDefaultLauncher() && !askedDefaultLauncherOnce) {
             showDefaultLauncherPrompt()
         }
@@ -308,10 +307,9 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun disableKioskModeIfActive() {
-        try { stopLockTask() } catch (_: Exception) { /* ignore */ }
+        try { stopLockTask() } catch (_: Exception) { }
     }
 
-    // ADDITIVE: centralized helper that accepts stored admin password or legacy PIN
     private fun verifyAdminSecret(input: String): Boolean {
         if (PasswordStore.isLocked(this)) {
             val seconds = PasswordStore.remainingLockMs(this) / 1000
@@ -328,7 +326,6 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun showAdminPanel() {
-        // Authenticate first
         showPinDialog {
             val options = arrayOf("Accessibility settings", "Change Admin Password")
             AlertDialog.Builder(this)
@@ -350,13 +347,10 @@ class MainActivity : AppCompatActivity() {
                 addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             })
         } catch (_: Exception) {
-            // Last-resort fallback if the specific screen isn't available
-            try { startActivity(Intent(Settings.ACTION_SETTINGS)) } catch (_: Exception) { /* ignore */ }
+            try { startActivity(Intent(Settings.ACTION_SETTINGS)) } catch (_: Exception) { }
         }
     }
 
-
-    // In-launcher Change Password dialog (local-only)
     private fun showChangePasswordDialog() {
         val scroll = ScrollView(this)
         val container = LinearLayout(this).apply {
@@ -423,7 +417,7 @@ class MainActivity : AppCompatActivity() {
                 }
                 if (newPw != conf) {
                     error.visibility = View.VISIBLE
-                    error.text = "Passwords don’t match."
+                    error.text = "Passwords don't match."
                     return@setOnClickListener
                 }
                 if (!PasswordPolicy.strongEnough(newPw)) {
@@ -461,12 +455,6 @@ class MainActivity : AppCompatActivity() {
         params.marginStart = dpToPx(if (isTablet) 48 else 32)
         topInfoBar.layoutParams = params
 
-        val gridParams = homeGridRecyclerView.layoutParams as FrameLayout.LayoutParams
-        gridParams.topMargin = dpToPx(if (isTablet) 200 else 160)
-        gridParams.bottomMargin = dpToPx(if (isTablet) 200 else 160)
-        gridParams.marginStart = dpToPx(if (isTablet) 48 else 32)
-        gridParams.marginEnd = dpToPx(if (isTablet) 48 else 32)
-        homeGridRecyclerView.layoutParams = gridParams
     }
 
     private fun initializeViews() {
@@ -517,11 +505,9 @@ class MainActivity : AppCompatActivity() {
                     Math.abs(deltaX) > Math.abs(deltaY) && Math.abs(velocityX) > 800 -> {
                         if (isPanelOpen) {
                             if (leftPanel.visibility == View.VISIBLE && deltaX < 0) {
-                                hideLeftPanel()
-                                true
+                                hideLeftPanel(); true
                             } else if (rightPanel.visibility == View.VISIBLE && deltaX > 0) {
-                                hideRightPanel()
-                                true
+                                hideRightPanel(); true
                             } else false
                         } else {
                             if (deltaX < 0 && !isDrawerOpen) { showRightPanel(); true }
@@ -535,7 +521,7 @@ class MainActivity : AppCompatActivity() {
 
             override fun onScroll(e1: MotionEvent?, e2: MotionEvent, dx: Float, dy: Float): Boolean {
                 if (e1 == null || isDragging) return false
-                val deltaX = e2!!.x - e1.x
+                val deltaX = e2.x - e1.x
                 val deltaY = e2.y - e1.y
                 val minDistance = 80f
                 return when {
@@ -547,11 +533,9 @@ class MainActivity : AppCompatActivity() {
                     Math.abs(deltaX) > Math.abs(deltaY) && Math.abs(deltaX) > minDistance -> {
                         if (isPanelOpen) {
                             if (leftPanel.visibility == View.VISIBLE && deltaX < 0) {
-                                hideLeftPanel()
-                                true
+                                hideLeftPanel(); true
                             } else if (rightPanel.visibility == View.VISIBLE && deltaX > 0) {
-                                hideRightPanel()
-                                true
+                                hideRightPanel(); true
                             } else false
                         } else {
                             if (deltaX < 0 && !isDrawerOpen) { showRightPanel(); true }
@@ -564,7 +548,6 @@ class MainActivity : AppCompatActivity() {
             }
         })
 
-        // Always feed events to detector; consume touches when panel is open to block underlying taps.
         val gestureListener = View.OnTouchListener { _, event ->
             gestureDetector.onTouchEvent(event)
             isPanelOpen
@@ -596,6 +579,7 @@ class MainActivity : AppCompatActivity() {
             }
             .start()
     }
+
     private fun hideLeftPanel() {
         leftPanel.animate()
             .translationX(-leftPanel.width.toFloat())
@@ -608,8 +592,6 @@ class MainActivity : AppCompatActivity() {
             .start()
     }
 
-
-    // --- Drawer animations ---
     private fun slideUpDrawer() {
         if (!isFinishing && !isDestroyed) {
             appDrawer.animate()
@@ -635,14 +617,12 @@ class MainActivity : AppCompatActivity() {
                 .setDuration(300)
                 .withEndAction { blurOverlay.visibility = View.GONE }
                 .start()
-            // If you have a search box, clear it when closing
             searchInput.clearFocus()
             searchInput.setText("")
             isDrawerOpen = false
         }
     }
 
-    // --- Panels (wrappers around your existing hideLeftPanel/hideRightPanel) ---
     private fun showLeftPanel() {
         if (isPanelOpen) return
         isPanelOpen = true
@@ -657,7 +637,6 @@ class MainActivity : AppCompatActivity() {
                 .setInterpolator(AccelerateDecelerateInterpolator())
                 .start()
         }
-        // tap anywhere on the panel hides both
         leftPanel.setOnClickListener { hidePanels() }
     }
 
@@ -698,7 +677,6 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    // --- Time text updater ---
     private fun startTimeUpdater() {
         val timeRunnable = object : Runnable {
             override fun run() {
@@ -713,8 +691,7 @@ class MainActivity : AppCompatActivity() {
         handler.post(timeRunnable)
     }
 
-
-    // -------  CALENDAR  RESPONSIVENESS ------
+    // ---------- CALENDAR ----------
 
     private fun calKey(year: Int, month0: Int, day: Int): String =
         String.format(Locale.US, "%04d-%02d-%02d", year, month0 + 1, day)
@@ -733,7 +710,7 @@ class MainActivity : AppCompatActivity() {
                 for (i in 0 until arr.length()) list.add(arr.getString(i))
                 eventsByDay[key] = list
             }
-        } catch (_: Exception) { /* ignore bad data */ }
+        } catch (_: Exception) { }
     }
 
     private fun saveEventsToPrefs() {
@@ -746,7 +723,7 @@ class MainActivity : AppCompatActivity() {
             .apply()
     }
 
-    //---------- EVENT DIALOG-----
+    // ---------- EVENT DIALOG ----------
 
     private fun showDayEventsDialog(year: Int, month0: Int, day: Int) {
         val key = calKey(year, month0, day)
@@ -860,12 +837,12 @@ class MainActivity : AppCompatActivity() {
                     com.google.android.material.snackbar.Snackbar
                         .make(root, "Deleted", com.google.android.material.snackbar.Snackbar.LENGTH_LONG)
                         .setAction("UNDO") {
-                            val p = (pos).coerceIn(0, items.size)
+                            val p = pos.coerceIn(0, items.size)
                             items.add(p, removed)
                             eventsAdapter?.notifyItemInserted(p)
                             saveEventsAndRefresh(skipRefresh = true)
                         }
-                        .addCallback(object: com.google.android.material.snackbar.BaseTransientBottomBar.BaseCallback<com.google.android.material.snackbar.Snackbar>() {
+                        .addCallback(object : com.google.android.material.snackbar.BaseTransientBottomBar.BaseCallback<com.google.android.material.snackbar.Snackbar>() {
                             override fun onDismissed(transientBottomBar: com.google.android.material.snackbar.Snackbar?, event: Int) {
                                 if (event != com.google.android.material.snackbar.BaseTransientBottomBar.BaseCallback.DISMISS_EVENT_ACTION) {
                                     saveEventsAndRefresh()
@@ -961,9 +938,7 @@ class MainActivity : AppCompatActivity() {
                 if (isChecked) selected.add(position) else selected.remove(position)
                 onSelectionChanged(selected.isNotEmpty())
             }
-
             holder.editBtn.setOnClickListener { onEdit(position, t) }
-
             holder.row.setOnClickListener {
                 if (selected.contains(position)) selected.remove(position) else selected.add(position)
                 notifyItemChanged(position)
@@ -1046,7 +1021,6 @@ class MainActivity : AppCompatActivity() {
                 DragEvent.ACTION_DRAG_ENDED -> {
                     isDragging = false
                     hideDragFeedback()
-
                     if (event.result && dragData?.source == DragData.Source.DOCK) {
                         dragData.sourceView?.let { bottomBar.removeView(it) }
                     }
@@ -1179,7 +1153,7 @@ class MainActivity : AppCompatActivity() {
         clearSlot(position)
     }
 
-    // ---------- HOME GRID HELPERS (duplicate-proof) ----------
+    // ---------- HOME GRID HELPERS ----------
 
     private fun isAppAlreadyOnHomeScreen(app: AppObject): Boolean =
         homePackages.contains(app.packageName)
@@ -1246,11 +1220,11 @@ class MainActivity : AppCompatActivity() {
             .map { appInfo ->
                 val label = pm.getApplicationLabel(appInfo).toString()
                 val icon = pm.getApplicationIcon(appInfo)
+                iconRepository.cacheInstalledIcon(appInfo.packageName, icon)
                 AppObject(label, icon, appInfo.packageName)
             }
             .toMutableList()
 
-        // Force featured apps into the drawer even if not installed
         featuredApps.forEach { featured ->
             val alreadyPresent = installedLauncherApps.any { it.packageName == featured.packageName }
             if (!alreadyPresent) {
@@ -1289,7 +1263,6 @@ class MainActivity : AppCompatActivity() {
 
         loadBottomBarApps()
     }
-
 
     private fun handleDrawerAppDrag(app: AppObject) {
         val clipData = ClipData.newPlainText("drawer_app", app.packageName)
@@ -1376,7 +1349,7 @@ class MainActivity : AppCompatActivity() {
         return appView
     }
 
-    // ---------- PIN / LAUNCH / PANELS / UTIL ----------
+    // ---------- PIN / LAUNCH / UTIL ----------
 
     private fun addModernTouchFeedback(view: View) {
         view.setOnTouchListener { v, event ->
@@ -1410,7 +1383,11 @@ class MainActivity : AppCompatActivity() {
 
             val featured = featuredApps.firstOrNull { it.packageName == packageName }
             if (featured != null) {
-                openStoreOrFallback(featured.packageName, featured.storeUrl)
+                if (featured.storeUrl.isNotEmpty()) {
+                    openStoreOrFallback(featured.packageName, featured.storeUrl)
+                } else {
+                    Toast.makeText(this, "${featured.fallbackLabel} is not installed", Toast.LENGTH_SHORT).show()
+                }
                 return
             }
 
@@ -1420,7 +1397,6 @@ class MainActivity : AppCompatActivity() {
             Log.e("MainActivity", "Failed to launch $packageName", e)
         }
     }
-
 
     private fun showPinDialog(onSuccess: () -> Unit) {
         val container = LinearLayout(this).apply {
@@ -1520,42 +1496,33 @@ class MainActivity : AppCompatActivity() {
         dialog.show()
     }
 
-    // ---------- Default Launcher: prompt + settings jump ----------
+    // ---------- Default Launcher ----------
 
-
-    /** Try to open the "Choose default apps" screen. Has several fallbacks for OEMs/versions. */
     private fun openDefaultAppsSettings() {
         val tries = mutableListOf<Intent>()
 
-        // 1) Direct "Manage default apps" (works on many AOSP/OEM builds)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
             tries += Intent(Settings.ACTION_MANAGE_DEFAULT_APPS_SETTINGS)
         }
-        // 2) Specific Home settings picker (AOSP)
         tries += Intent(Settings.ACTION_HOME_SETTINGS)
-        // 3) General Apps settings as a last resort
         tries += Intent(Settings.ACTION_APPLICATION_SETTINGS)
-        // 4) On Android 10+ some devices handle this better via RoleManager UI for HOME
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             val rm = getSystemService(RoleManager::class.java)
             if (rm != null && !rm.isRoleHeld(RoleManager.ROLE_HOME)) {
-                // Role UI is another good route to the exact same decision
                 tries += rm.createRequestRoleIntent(RoleManager.ROLE_HOME)
             }
         }
 
         for (intent in tries) {
             try {
-                // Prefer starting as a new task so user returns to launcher after
                 intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                 startActivity(intent)
                 return
-            } catch (_: Exception) { /* try next */ }
+            } catch (_: Exception) { }
         }
         Toast.makeText(this, "Unable to open Default apps settings on this device.", Toast.LENGTH_LONG).show()
     }
 
-    /** Show one-time dialog asking user to set this app as default launcher. */
     private fun showDefaultLauncherPrompt() {
         askedDefaultLauncherOnce = true
         AlertDialog.Builder(this)
@@ -1566,9 +1533,7 @@ class MainActivity : AppCompatActivity() {
             .show()
     }
 
-    // ---------- Right/Left panels (restored to original style) ----------
-
-    // ---------- Right/Left panels ----------
+    // ---------- Calendar Panel ----------
 
     private fun setupCalendarPanel() {
         if (eventsByDay.isEmpty()) loadEventsFromPrefs()
@@ -1596,25 +1561,18 @@ class MainActivity : AppCompatActivity() {
             setImageResource(android.R.drawable.ic_media_previous)
             background = null
             setColorFilter(Color.WHITE)
-            setOnClickListener {
-                calMonth.add(Calendar.MONTH, -1)
-                setupCalendarPanel()
-            }
+            setOnClickListener { calMonth.add(Calendar.MONTH, -1); setupCalendarPanel() }
         }
         val nextBtn = ImageButton(this).apply {
             setImageResource(android.R.drawable.ic_media_next)
             background = null
             setColorFilter(Color.WHITE)
-            setOnClickListener {
-                calMonth.add(Calendar.MONTH, 1)
-                setupCalendarPanel()
-            }
+            setOnClickListener { calMonth.add(Calendar.MONTH, 1); setupCalendarPanel() }
         }
         headerRow.addView(titleView)
         headerRow.addView(prevBtn)
         headerRow.addView(nextBtn)
         container.addView(headerRow)
-
         container.addView(spaceView(12))
 
         val grid = GridLayout(this).apply { columnCount = 7 }
@@ -1645,14 +1603,12 @@ class MainActivity : AppCompatActivity() {
                 return wrap
             }
 
-            // Week headers
             listOf("S","M","T","W","T","F","S").forEach {
                 grid.addView(dayCell(it, bold = true, tint = Color.parseColor("#AAAAAA")))
             }
 
-            // First day & padding
             val cal = (calMonth.clone() as Calendar).apply { set(Calendar.DAY_OF_MONTH, 1) }
-            val leading = (cal.get(Calendar.DAY_OF_WEEK) - 1)
+            val leading = cal.get(Calendar.DAY_OF_WEEK) - 1
             val daysInMonth = cal.getActualMaximum(Calendar.DAY_OF_MONTH)
             repeat(leading) { grid.addView(dayCell("")) }
 
@@ -1693,7 +1649,6 @@ class MainActivity : AppCompatActivity() {
 
         container.addView(spaceView(16))
 
-        // Upcoming list
         val upcoming = nextEvents(5)
         val upTitle = TextView(this).apply {
             text = "Upcoming Events"
@@ -1705,19 +1660,17 @@ class MainActivity : AppCompatActivity() {
         container.addView(upTitle)
 
         if (upcoming.isEmpty()) {
-            val empty = TextView(this).apply {
+            container.addView(TextView(this).apply {
                 text = "No upcoming events"
                 setTextColor(Color.parseColor("#AAAAAA"))
-            }
-            container.addView(empty)
+            })
         } else {
             upcoming.forEach { (date, title) ->
-                val row = TextView(this).apply {
+                container.addView(TextView(this).apply {
                     text = "• $date  –  $title"
                     setTextColor(Color.parseColor("#CCCCCC"))
                     setPadding(0, dpToPx(4), 0, dpToPx(4))
-                }
-                container.addView(row)
+                })
             }
         }
     }
@@ -1733,6 +1686,8 @@ class MainActivity : AppCompatActivity() {
         return items.take(limit)
     }
 
+    // ---------- Right Panel ----------
+
     private fun setupInterestingPanel() {
         val scrollView = rightPanel as ScrollView
         val container = scrollView.getChildAt(0) as? LinearLayout ?: LinearLayout(this).also {
@@ -1742,23 +1697,21 @@ class MainActivity : AppCompatActivity() {
         }
         container.removeAllViews()
 
-        val headerText = TextView(this).apply {
+        container.addView(TextView(this).apply {
             text = "Quick Info"
             textSize = 28f
             setTextColor(Color.WHITE)
             typeface = android.graphics.Typeface.DEFAULT_BOLD
             setPadding(0, 0, 0, dpToPx(24))
-        }
-        container.addView(headerText)
+        })
 
-        val systemCard = createInfoCard(
+        container.addView(createInfoCard(
             "System Status", listOf(
                 "Battery: ${getBatteryLevel()}%",
                 "Storage: ${getStorageInfo()}",
                 "Memory: ${getMemoryInfo()}"
             )
-        )
-        container.addView(systemCard)
+        ))
 
         val funFacts = listOf(
             "Did you know? Octopuses have three hearts!",
@@ -1767,19 +1720,16 @@ class MainActivity : AppCompatActivity() {
             "Bananas are berries, but strawberries aren't!",
             "A day on Venus is longer than its year!"
         )
-        val factCard = createInfoCard("Fun Fact", listOf(funFacts.random()))
-        container.addView(factCard)
+        container.addView(createInfoCard("Fun Fact", listOf(funFacts.random())))
 
-        // Keep the original simple text list for Quick Actions (no buttons).
-        val actionsCard = createInfoCard(
+        container.addView(createInfoCard(
             "Quick Actions", listOf(
                 "📱 Device Settings",
                 "🔋 Battery Optimization",
                 "📶 Network Settings",
                 "🔊 Sound Settings"
             )
-        )
-        container.addView(actionsCard)
+        ))
     }
 
     private fun createInfoCard(title: String, items: List<String>): LinearLayout {
@@ -1793,61 +1743,46 @@ class MainActivity : AppCompatActivity() {
                 LinearLayout.LayoutParams.WRAP_CONTENT
             ).apply { setMargins(0, 0, 0, dpToPx(16)) }
         }
-
-        val titleView = TextView(this).apply {
+        card.addView(TextView(this).apply {
             text = title
             textSize = 18f
             setTextColor(Color.WHITE)
             typeface = android.graphics.Typeface.DEFAULT_BOLD
             setPadding(0, 0, 0, dpToPx(12))
-        }
-        card.addView(titleView)
-
+        })
         items.forEach { item ->
-            val itemView = TextView(this).apply {
+            card.addView(TextView(this).apply {
                 text = item
                 textSize = 14f
                 setTextColor(Color.parseColor("#CCCCCC"))
                 setPadding(0, dpToPx(4), 0, dpToPx(4))
-            }
-            card.addView(itemView)
+            })
         }
         return card
     }
 
-    // ---------- Default Launcher helpers (kept minimal) ----------
+    // ---------- Default Launcher helpers ----------
 
-    /** True iff this app is currently the selected HOME handler */
     private fun isDefaultLauncher(): Boolean {
         val intent = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME)
         val res = packageManager.resolveActivity(intent, PackageManager.MATCH_DEFAULT_ONLY) ?: return false
         return res.activityInfo?.packageName == packageName
     }
 
-    /**
-     * Jump the user straight to "Choose default apps" → Home app.
-     * Primary target: ACTION_HOME_SETTINGS.
-     * Fallbacks are provided for broader device support.
-     */
     private fun promptSetAsDefaultLauncher() {
-        // 1) Directly open the "Choose default apps" screen focused on Home app
         val intents = mutableListOf(
             Intent(Settings.ACTION_HOME_SETTINGS),
-            // Some OEMs honor this general default apps screen
             Intent(Settings.ACTION_MANAGE_DEFAULT_APPS_SETTINGS),
-            // Absolute last resort: generic Settings
             Intent(Settings.ACTION_SETTINGS)
         )
         for (i in intents) {
             try {
                 startActivity(i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
                 return
-            } catch (_: Exception) { /* try next */ }
+            } catch (_: Exception) { }
         }
     }
 
-    /** Shows the snackbar prompt if we're not default yet. */
-    /** Shows a concise, actionable Snackbar if we're not default yet. */
     private fun showDefaultLauncherSnackbarIfNeeded() {
         if (isDefaultLauncher()) return
         val anchor = findViewById<View>(android.R.id.content)
@@ -1864,7 +1799,6 @@ class MainActivity : AppCompatActivity() {
                 .show()
         }
     }
-
 
     // ---------- System info helpers ----------
 
@@ -1898,6 +1832,8 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun dpToPx(dp: Int): Int = (dp * resources.displayMetrics.density).toInt()
+
+    // ---------- Lifecycle ----------
 
     override fun onBackPressed() {
         when {
@@ -1941,12 +1877,10 @@ class MainActivity : AppCompatActivity() {
             @Suppress("DEPRECATION")
             registerReceiver(sysDialogsReceiver, filter)
         }
-        // Gentle reminder if not default yet
         showDefaultLauncherSnackbarIfNeeded()
     }
 
     override fun onStop() {
-        // If lock-task active, bounce back to HOME
         val am = getSystemService(android.app.ActivityManager::class.java)
         val inLockTask = am.lockTaskModeState != android.app.ActivityManager.LOCK_TASK_MODE_NONE
         if (inLockTask) {
@@ -1960,15 +1894,12 @@ class MainActivity : AppCompatActivity() {
         super.onStop()
     }
 
-    // --- Immersive helpers ---
-
     private fun enterImmersive() {
         if (Build.VERSION.SDK_INT >= 30) {
             window.setDecorFitsSystemWindows(false)
             window.insetsController?.let { c ->
                 c.hide(WindowInsets.Type.statusBars() or WindowInsets.Type.navigationBars())
-                c.systemBarsBehavior =
-                    WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+                c.systemBarsBehavior = WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
             }
         } else {
             @Suppress("DEPRECATION")
