@@ -211,7 +211,7 @@ class MainActivity : AppCompatActivity() {
         FeaturedAppConfig("com.sencatech.learninganimals", "Learning Animals", ""),
         FeaturedAppConfig("com.sencatech.learningclothes", "Learning Clothes", ""),
         FeaturedAppConfig("com.sencatech.learningfruits", "Learning Fruits", ""),
-        FeaturedAppConfig("com.sencatech.sportsgoo", "Learning Sports Goods", ""),
+        FeaturedAppConfig("com.sencatech.learningsportsgoods", "Learning Sports Goods", ""),
         FeaturedAppConfig("com.sencatech.learningnotes", "Learning Note", ""),
         FeaturedAppConfig("com.sencatech.learningtransportation", "Learning Transport", ""),
         FeaturedAppConfig("com.sencatech.learningvegetables", "Learning Vegetables", ""),

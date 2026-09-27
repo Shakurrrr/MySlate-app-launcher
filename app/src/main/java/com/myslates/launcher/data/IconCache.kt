@@ -3,6 +3,7 @@ package com.myslates.launcher.data
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.os.Build
 import java.io.File
 import java.io.FileOutputStream
 
@@ -26,7 +27,13 @@ class IconCache(private val context: Context) {
     fun saveBitmap(packageName: String, bitmap: Bitmap) {
         val file = getIconFile(packageName)
         FileOutputStream(file).use { out ->
-            bitmap.compress(Bitmap.CompressFormat.WEBP_LOSSLESS, 100, out)
+            val format = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                Bitmap.CompressFormat.WEBP_LOSSLESS  // API 30+
+            } else {
+                @Suppress("DEPRECATION")
+                Bitmap.CompressFormat.WEBP           // API 1–29 (lossless at quality 100)
+            }
+            bitmap.compress(format, 100, out)
         }
     }
 }
